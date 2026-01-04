@@ -1,0 +1,24 @@
+---
+config:
+  theme: redux-dark
+---
+flowchart TD
+  C["Clients<br/>(gRPC / HTTP)"] --> API["API Gateway<br/>Auth · Validation · Routing"]
+  API --> B["Dynamic Batching<br/>Shape-aware · Time-windowed"]
+  B --> S["Scheduler<br/>Latency / Throughput policy"]
+  S --> W{"GPU Worker Pool<br/>(per GPU / MIG slice)"}
+
+  W --> W0["GPU Worker 0<br/>Streams · Buffers · Context"]
+  W --> W1["GPU Worker 1<br/>Streams · Buffers · Context"]
+  W --> WN["GPU Worker N<br/>Streams · Buffers · Context"]
+
+  subgraph BEL["Execution Backends (Native Kernels)"]
+    PT["PyTorch Runtime<br/>(LibTorch)"]
+    TF["TensorFlow Runtime<br/>(TF C API)"]
+    ORT["ONNX Runtime<br/>(CUDA / TensorRT EP)"]
+    TRT["TensorRT Engines<br/>(Native)"]
+  end
+
+  W0 --> BEL
+  W1 --> BEL
+  WN --> BEL

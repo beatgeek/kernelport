@@ -79,47 +79,8 @@ The scheduler can be tuned for:
 ---
 
 ## Architecture (High Level)
-Clients (gRPC / HTTP)
-        |
-        v
-+---------------------+
-|     API Layer       |
-| Validation & I/O    |
-+---------------------+
-        |
-        v
-+---------------------+
-|  Dynamic Batching   |
-| (per model/shape)   |
-+---------------------+
-        |
-        v
-+---------------------+
-|     Scheduler       |
-| (latency / TPS)     |
-+---------------------+
-        |
-        v
-+---------------------------------------------------+
-|                    Workers                        |
-|                                                   |
-|  +-----------+   +-----------+   +-------------+ |
-|  | Worker    |   | Worker    |   | Worker      | |
-|  | GPU 0     |   | GPU 1     |   | GPU N       | |
-|  +-----+-----+   +-----+-----+   +------+------+ |
-|        |               |               |          |
-+--------|---------------|---------------|----------+
-         |               |               |
-         v               v               v
-+---------------------------------------------------+
-|            Backend Execution Layer                |
-|                                                   |
-|   +-----------+   +--------------+   +----------+ |
-|   | PyTorch   |   | TensorFlow   |   | ONNX /   | |
-|   | LibTorch  |   |   C API      |   | TensorRT | |
-|   +-----------+   +--------------+   +----------+ |
-+---------------------------------------------------+
 
+![KernelPort Architecture](docs/kernelport-hl-2026-01-04-005213.svg)
 
-
+![KernelPort GPU Worker](docs/kernelport-gpu-2026-01-04-005556.svg)
 

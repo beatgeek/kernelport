@@ -1,0 +1,31 @@
+---
+config:
+      theme: redux-dark
+---
+flowchart LR
+  Q[Batch Job Queue] -->|dequeue| P["Prepare Inputs<br/>Validate · Stack · Layout"]
+  P --> H2D["Host→Device Copy<br/>Pinned buffers"]
+  H2D --> EX["Execute Backend<br/>LibTorch · TF · ORT · TRT"]
+  EX --> D2H["Device→Host Copy<br/>(if needed)"]
+  D2H --> SPLIT["Split Outputs<br/>per request"]
+  SPLIT --> RESP["Respond<br/>gRPC / HTTP"]
+
+  subgraph GPU["GPU Worker (bound to one GPU / MIG slice)"]
+    direction TB
+
+    subgraph MEM["Memory Pools"]
+      HP["Pinned Host Pool"]
+      DP["Device Buffer Pool"]
+    end
+
+    subgraph STREAMS["CUDA Streams"]
+      CS["Compute Stream"]
+      XS["Copy Stream(s)"]
+    end
+
+    HP -.-> H2D
+    DP -.-> EX
+    XS -.-> H2D
+    CS -.-> EX
+    XS -.-> D2H
+  end
