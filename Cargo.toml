@@ -1,0 +1,13 @@
+[workspace.package]
+edition = "2021"
+
+[workspace]
+resolver = "2"
+members = [
+  "crates/kernelport-core",
+  "crates/kernelport-runtime",
+  "crates/kernelport-backend-ort",
+  "crates/kernelport-proto",
+  "crates/kernelport-server",
+]
+

@@ -1,0 +1,22 @@
+[package]
+name = "kernelport-server"
+version = "0.0.0"
+edition = "2021"
+
+[[bin]]
+name = "kernelportd"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+bytes = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tonic = "0.12"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+kernelport-core = { path = "../kernelport-core" }
+kernelport-runtime = { path = "../kernelport-runtime" }
+kernelport-proto = { path = "../kernelport-proto" }
+kernelport-backend-ort = { path = "../kernelport-backend-ort" }
+

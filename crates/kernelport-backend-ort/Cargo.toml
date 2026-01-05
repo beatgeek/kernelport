@@ -1,0 +1,10 @@
+[package]
+name = "kernelport-backend-ort"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+bytes = "1"
+kernelport-core = { path = "../kernelport-core" }
+

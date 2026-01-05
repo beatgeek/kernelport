@@ -1,0 +1,13 @@
+[package]
+name = "kernelport-runtime"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tracing = "0.1"
+bytes = "1"
+
+kernelport-core = { path = "../kernelport-core" }
+
