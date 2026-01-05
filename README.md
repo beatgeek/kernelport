@@ -84,3 +84,23 @@ The scheduler can be tuned for:
 
 ![KernelPort GPU Worker](docs/kernelport-gpu-2026-01-04-005556.svg)
 
+---
+
+## Local Development
+
+### CPU (macOS or Linux)
+
+- Install Rust components: `rustup component add rustfmt clippy`
+- Run checks: `make check`
+- Run the server:
+  - `cargo run -p kernelport-server -- serve --device cpu`
+- ORT identity test (CPU): `cargo test -p kernelport-backend-ort --test identity`
+
+### CUDA (Linux + NVIDIA)
+
+KernelPort supports CUDA via ONNX Runtime. For GPU inference:
+
+- Provide a CUDA-enabled ONNX Runtime shared library (build from source or use a CUDA-enabled package).
+- Set `ORT_DYLIB_PATH` to the CUDA-enabled `libonnxruntime.so`.
+- Build with the CUDA feature and select a device:
+  - `cargo run -p kernelport-server --features ort-cuda -- serve --device cuda:0`

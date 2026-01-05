@@ -22,4 +22,3 @@ pub struct Timings {
     pub batched_us: u64,
     pub backend_us: u64,
 }
-

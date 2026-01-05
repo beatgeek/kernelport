@@ -28,8 +28,16 @@ pub struct Batcher {
 }
 
 impl Batcher {
-    pub fn new(policy: BatchPolicy, rx: mpsc::Receiver<InferenceRequest>, scheduler: SchedulerHandle) -> Self {
-        Self { policy, rx, scheduler }
+    pub fn new(
+        policy: BatchPolicy,
+        rx: mpsc::Receiver<InferenceRequest>,
+        scheduler: SchedulerHandle,
+    ) -> Self {
+        Self {
+            policy,
+            rx,
+            scheduler,
+        }
     }
 
     pub async fn run(mut self) -> Result<()> {
@@ -96,4 +104,3 @@ impl Batcher {
         Ok(())
     }
 }
-

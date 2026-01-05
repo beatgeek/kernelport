@@ -5,9 +5,8 @@ edition = "2021"
 build = "build.rs"
 
 [dependencies]
-prost = "0.12"
+prost = "0.13"
 tonic = "0.12"
 
 [build-dependencies]
 tonic-build = "0.12"
-

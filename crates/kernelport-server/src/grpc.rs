@@ -21,13 +21,15 @@ impl pb::inference_service_server::InferenceService for GrpcSvc {
 
         let mut inputs = Vec::with_capacity(req.inputs.len());
         for t in req.inputs {
-            let dtype = parse_dtype(&t.dtype).map_err(|e| Status::invalid_argument(e.to_string()))?;
+            let dtype =
+                parse_dtype(&t.dtype).map_err(|e| Status::invalid_argument(e.to_string()))?;
             let shape_usize: Vec<usize> = t
                 .shape
                 .into_iter()
                 .map(|d| usize::try_from(d).unwrap_or(0))
                 .collect();
-            let tensor = Tensor::from_cpu_bytes(dtype, Shape::from_slice(&shape_usize), Bytes::from(t.data));
+            let tensor =
+                Tensor::from_cpu_bytes(dtype, Shape::from_slice(&shape_usize), Bytes::from(t.data));
             inputs.push((IOName(t.name), tensor));
         }
 
@@ -82,4 +84,3 @@ fn parse_dtype(s: &str) -> Result<DType> {
         _ => anyhow::bail!("unknown dtype: {}", s),
     })
 }
-

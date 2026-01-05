@@ -7,4 +7,3 @@ use crate::BatchJob;
 pub trait WorkerModel: Send {
     fn infer_batch(&mut self, job: BatchJob) -> Result<()>;
 }
-

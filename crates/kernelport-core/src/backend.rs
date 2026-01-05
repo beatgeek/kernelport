@@ -23,4 +23,3 @@ pub trait BackendModel: Send + 'static {
     /// Inputs are already batched and (eventually) on the right device.
     fn infer(&mut self, inputs: Vec<Tensor>) -> Result<Vec<Tensor>>;
 }
-

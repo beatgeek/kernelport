@@ -1,18 +1,37 @@
-use anyhow::Result;
+mod cli;
+mod grpc;
+mod registry;
+
+use anyhow::{Context, Result};
+use clap::Parser;
+use cli::{Cli, Command};
 use kernelport_proto::kernelport::v1::inference_service_server::InferenceServiceServer;
 use kernelport_runtime::{BatchPolicy, Batcher, Scheduler, Worker};
 use tokio::sync::mpsc;
 use tracing_subscriber::EnvFilter;
 
-mod grpc;
-mod registry;
-
 use grpc::GrpcSvc;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let cli = Cli::parse();
+
+    match cli.command {
+        Command::Serve {
+            grpc_addr,
+            log,
+            device,
+        } => {
+            let device = parse_device(&device)?;
+            serve(grpc_addr, log, device).await
+        }
+    }
+}
+
+async fn serve(grpc_addr: String, log: String, device: kernelport_core::Device) -> Result<()> {
+    std::env::set_var("RUST_LOG", &log);
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env().add_directive("info".parse()?))
+        .with_env_filter(EnvFilter::from_default_env())
         .init();
 
     // ---- Channels: requests -> batcher -> scheduler -> worker(s)
@@ -36,7 +55,7 @@ async fn main() -> Result<()> {
     reg.load_onnx(
         "demo",
         std::path::PathBuf::from("models/demo.onnx"),
-        kernelport_core::Device::Cuda { device_id: 0 },
+        device,
     )
     .ok(); // allow startup without the file for now
 
@@ -67,7 +86,7 @@ async fn main() -> Result<()> {
     });
 
     // gRPC server
-    let addr = "0.0.0.0:50051".parse().unwrap();
+    let addr = grpc_addr.parse()?;
     let svc = GrpcSvc { batcher_tx };
 
     tracing::info!(%addr, "kernelportd gRPC listening");
@@ -77,6 +96,19 @@ async fn main() -> Result<()> {
         .await?;
 
     Ok(())
+}
+
+fn parse_device(raw: &str) -> Result<kernelport_core::Device> {
+    if raw.eq_ignore_ascii_case("cpu") {
+        return Ok(kernelport_core::Device::Cpu);
+    }
+
+    if let Some(rest) = raw.strip_prefix("cuda:") {
+        let device_id: u32 = rest.parse().context("invalid cuda device id")?;
+        return Ok(kernelport_core::Device::Cuda { device_id });
+    }
+
+    anyhow::bail!("unsupported device: {raw} (expected cpu or cuda:N)");
 }
 
 use anyhow::anyhow;
@@ -118,4 +150,3 @@ impl WorkerModel for DemoWorkerModel {
         Ok(())
     }
 }
-

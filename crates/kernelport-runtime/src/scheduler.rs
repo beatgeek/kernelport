@@ -10,7 +10,10 @@ pub struct SchedulerHandle {
 
 impl SchedulerHandle {
     pub async fn submit(&self, job: BatchJob) -> Result<()> {
-        self.tx.send(job).await.map_err(|e| anyhow::anyhow!(e.to_string()))
+        self.tx
+            .send(job)
+            .await
+            .map_err(|e| anyhow::anyhow!(e.to_string()))
     }
 }
 
@@ -22,7 +25,11 @@ pub struct Scheduler {
 
 impl Scheduler {
     pub fn new(rx: mpsc::Receiver<BatchJob>, worker_txs: Vec<mpsc::Sender<BatchJob>>) -> Self {
-        Self { rx, worker_txs, rr: 0 }
+        Self {
+            rx,
+            worker_txs,
+            rr: 0,
+        }
     }
 
     pub fn handle(tx: mpsc::Sender<BatchJob>) -> SchedulerHandle {
@@ -41,4 +48,3 @@ impl Scheduler {
         Ok(())
     }
 }
-

@@ -5,4 +5,3 @@ pub enum ModelArtifact {
     TorchScriptPath(std::path::PathBuf),
     TfSavedModelDir(std::path::PathBuf),
 }
-

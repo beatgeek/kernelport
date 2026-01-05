@@ -10,6 +10,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 bytes = "1"
+clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 tonic = "0.12"
 tracing = "0.1"
@@ -20,3 +21,5 @@ kernelport-runtime = { path = "../kernelport-runtime" }
 kernelport-proto = { path = "../kernelport-proto" }
 kernelport-backend-ort = { path = "../kernelport-backend-ort" }
 
+[features]
+ort-cuda = ["kernelport-backend-ort/cuda"]

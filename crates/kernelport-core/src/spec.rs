@@ -15,4 +15,3 @@ pub struct ModelSpec {
     pub outputs: Vec<TensorSpec>,
     pub max_batch: usize,
 }
-

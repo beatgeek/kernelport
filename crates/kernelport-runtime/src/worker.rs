@@ -12,11 +12,10 @@ pub struct Worker {
 
 impl Worker {
     pub async fn run(mut self) -> Result<()> {
-        info!(worker_id=self.id, "worker started");
+        info!(worker_id = self.id, "worker started");
         while let Some(job) = self.inbox.recv().await {
             self.model.infer_batch(job)?;
         }
         Ok(())
     }
 }
-
