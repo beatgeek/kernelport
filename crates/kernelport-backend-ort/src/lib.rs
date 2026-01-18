@@ -283,6 +283,7 @@ fn ort_value_to_tensor(value: &ort::value::ValueRef<'_>) -> Result<Tensor> {
     }
 }
 
+#[allow(clippy::manual_is_multiple_of)]
 fn bytes_to_f32(bytes: &Bytes) -> Result<Vec<f32>> {
     ensure!(bytes.len() % 4 == 0, "f32 input has invalid byte length");
     Ok(bytes
@@ -291,6 +292,7 @@ fn bytes_to_f32(bytes: &Bytes) -> Result<Vec<f32>> {
         .collect())
 }
 
+#[allow(clippy::manual_is_multiple_of)]
 fn bytes_to_i64(bytes: &Bytes) -> Result<Vec<i64>> {
     ensure!(bytes.len() % 8 == 0, "i64 input has invalid byte length");
     Ok(bytes
@@ -299,6 +301,7 @@ fn bytes_to_i64(bytes: &Bytes) -> Result<Vec<i64>> {
         .collect())
 }
 
+#[allow(clippy::manual_is_multiple_of)]
 fn bytes_to_i32(bytes: &Bytes) -> Result<Vec<i32>> {
     ensure!(bytes.len() % 4 == 0, "i32 input has invalid byte length");
     Ok(bytes
