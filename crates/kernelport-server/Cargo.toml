@@ -12,9 +12,10 @@ anyhow = "1"
 bytes = "1"
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
-tonic = "0.12"
+tonic = "0.14"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tonic-reflection = "0.14"
 
 kernelport-core = { path = "../kernelport-core" }
 kernelport-runtime = { path = "../kernelport-runtime" }

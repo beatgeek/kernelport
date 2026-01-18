@@ -4,17 +4,26 @@ package kernelport.v1;
 message Tensor {
   // Minimal v0 tensor format (CPU bytes only)
   string name = 1;
-  string dtype = 2;          // "F32", "I64", etc.
+  DType dtype = 2;
   repeated int64 shape = 3;
   bytes data = 4;
 }
 
-message PredictRequest {
+enum DType {
+  DTYPE_UNSPECIFIED = 0;
+  F32 = 1;
+  F16 = 2;
+  I64 = 3;
+  I32 = 4;
+  U8 = 5;
+}
+
+message InferRequest {
   string model = 1;
   repeated Tensor inputs = 2;
 }
 
-message PredictResponse {
+message InferResponse {
   repeated Tensor outputs = 1;
   uint64 queued_us = 2;
   uint64 batched_us = 3;
@@ -22,6 +31,5 @@ message PredictResponse {
 }
 
 service InferenceService {
-  rpc Predict(PredictRequest) returns (PredictResponse);
+  rpc Infer(InferRequest) returns (InferResponse);
 }
-

@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use bytes::Bytes;
 use kernelport_core::{DType, IOName, Shape, Tensor};
 use kernelport_proto::kernelport::v1 as pb;
@@ -13,16 +13,16 @@ pub struct GrpcSvc {
 
 #[tonic::async_trait]
 impl pb::inference_service_server::InferenceService for GrpcSvc {
-    async fn predict(
+    async fn infer(
         &self,
-        req: Request<pb::PredictRequest>,
-    ) -> std::result::Result<Response<pb::PredictResponse>, Status> {
+        req: Request<pb::InferRequest>,
+    ) -> std::result::Result<Response<pb::InferResponse>, Status> {
         let req = req.into_inner();
 
         let mut inputs = Vec::with_capacity(req.inputs.len());
         for t in req.inputs {
             let dtype =
-                parse_dtype(&t.dtype).map_err(|e| Status::invalid_argument(e.to_string()))?;
+                parse_dtype(t.dtype).map_err(|e| Status::invalid_argument(e.to_string()))?;
             let shape_usize: Vec<usize> = t
                 .shape
                 .into_iter()
@@ -59,13 +59,13 @@ impl pb::inference_service_server::InferenceService for GrpcSvc {
             };
             pb_outs.push(pb::Tensor {
                 name: name.0,
-                dtype: format!("{:?}", t.desc.dtype),
+                dtype: to_proto_dtype(t.desc.dtype) as i32,
                 shape: t.desc.shape.0.iter().map(|d| *d as i64).collect(),
                 data: data.to_vec(),
             });
         }
 
-        Ok(Response::new(pb::PredictResponse {
+        Ok(Response::new(pb::InferResponse {
             outputs: pb_outs,
             queued_us: timings.queued_us,
             batched_us: timings.batched_us,
@@ -74,13 +74,24 @@ impl pb::inference_service_server::InferenceService for GrpcSvc {
     }
 }
 
-fn parse_dtype(s: &str) -> Result<DType> {
-    Ok(match s {
-        "F32" => DType::F32,
-        "F16" => DType::F16,
-        "I64" => DType::I64,
-        "I32" => DType::I32,
-        "U8" => DType::U8,
-        _ => anyhow::bail!("unknown dtype: {}", s),
+fn parse_dtype(raw: i32) -> Result<DType> {
+    let dtype = pb::DType::try_from(raw).context("unknown dtype enum value")?;
+    Ok(match dtype {
+        pb::DType::F32 => DType::F32,
+        pb::DType::F16 => DType::F16,
+        pb::DType::I64 => DType::I64,
+        pb::DType::I32 => DType::I32,
+        pb::DType::U8 => DType::U8,
+        pb::DType::DtypeUnspecified => anyhow::bail!("dtype is unspecified"),
     })
+}
+
+fn to_proto_dtype(dtype: DType) -> pb::DType {
+    match dtype {
+        DType::F32 => pb::DType::F32,
+        DType::F16 => pb::DType::F16,
+        DType::I64 => pb::DType::I64,
+        DType::I32 => pb::DType::I32,
+        DType::U8 => pb::DType::U8,
+    }
 }

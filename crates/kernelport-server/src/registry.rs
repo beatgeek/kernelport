@@ -3,10 +3,11 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use kernelport_backend_ort::OrtBackend;
-use kernelport_core::{Backend, BackendModel, Device, ModelArtifact, Tensor};
+use kernelport_core::{Backend, BackendModel, Device, IOName, ModelArtifact, Tensor};
 
 pub struct LoadedModel {
     pub model: Mutex<Box<dyn BackendModelAdapter>>,
+    pub output_names: Vec<IOName>,
 }
 
 pub trait BackendModelAdapter: Send {
@@ -41,8 +42,15 @@ impl ModelRegistry {
         let artifact = ModelArtifact::OnnxPath(path);
         let model = backend.load(&artifact, device)?;
 
+        let output_names = model
+            .spec()
+            .outputs
+            .iter()
+            .map(|spec| spec.name.clone())
+            .collect();
         let loaded = LoadedModel {
             model: Mutex::new(Box::new(model)),
+            output_names,
         };
 
         self.models.insert(name.to_string(), Arc::new(loaded));

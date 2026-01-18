@@ -147,9 +147,7 @@ fn configure_cuda(builder: SessionBuilder, device_id: u32) -> Result<SessionBuil
     #[cfg(not(feature = "cuda"))]
     {
         let _ = (builder, device_id);
-        bail!(
-            "CUDA requested but kernelport-backend-ort was built without the `cuda` feature"
-        )
+        bail!("CUDA requested but kernelport-backend-ort was built without the `cuda` feature")
     }
 }
 
@@ -246,9 +244,7 @@ fn ort_value_to_tensor(value: &ort::value::ValueRef<'_>) -> Result<Tensor> {
     match *ty {
         TensorElementType::Float32 => {
             let array = value.try_extract_array::<f32>()?;
-            let slice = array
-                .as_slice()
-                .context("non-contiguous output tensor")?;
+            let slice = array.as_slice().context("non-contiguous output tensor")?;
             Ok(Tensor::from_cpu_bytes(
                 DType::F32,
                 kernel_shape,
@@ -257,9 +253,7 @@ fn ort_value_to_tensor(value: &ort::value::ValueRef<'_>) -> Result<Tensor> {
         }
         TensorElementType::Int64 => {
             let array = value.try_extract_array::<i64>()?;
-            let slice = array
-                .as_slice()
-                .context("non-contiguous output tensor")?;
+            let slice = array.as_slice().context("non-contiguous output tensor")?;
             Ok(Tensor::from_cpu_bytes(
                 DType::I64,
                 kernel_shape,
@@ -268,9 +262,7 @@ fn ort_value_to_tensor(value: &ort::value::ValueRef<'_>) -> Result<Tensor> {
         }
         TensorElementType::Int32 => {
             let array = value.try_extract_array::<i32>()?;
-            let slice = array
-                .as_slice()
-                .context("non-contiguous output tensor")?;
+            let slice = array.as_slice().context("non-contiguous output tensor")?;
             Ok(Tensor::from_cpu_bytes(
                 DType::I32,
                 kernel_shape,
@@ -279,9 +271,7 @@ fn ort_value_to_tensor(value: &ort::value::ValueRef<'_>) -> Result<Tensor> {
         }
         TensorElementType::Uint8 => {
             let array = value.try_extract_array::<u8>()?;
-            let slice = array
-                .as_slice()
-                .context("non-contiguous output tensor")?;
+            let slice = array.as_slice().context("non-contiguous output tensor")?;
             Ok(Tensor::from_cpu_bytes(
                 DType::U8,
                 kernel_shape,
@@ -294,10 +284,7 @@ fn ort_value_to_tensor(value: &ort::value::ValueRef<'_>) -> Result<Tensor> {
 }
 
 fn bytes_to_f32(bytes: &Bytes) -> Result<Vec<f32>> {
-    ensure!(
-        bytes.len().is_multiple_of(4),
-        "f32 input has invalid byte length"
-    );
+    ensure!(bytes.len() % 4 == 0, "f32 input has invalid byte length");
     Ok(bytes
         .chunks_exact(4)
         .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
@@ -305,10 +292,7 @@ fn bytes_to_f32(bytes: &Bytes) -> Result<Vec<f32>> {
 }
 
 fn bytes_to_i64(bytes: &Bytes) -> Result<Vec<i64>> {
-    ensure!(
-        bytes.len().is_multiple_of(8),
-        "i64 input has invalid byte length"
-    );
+    ensure!(bytes.len() % 8 == 0, "i64 input has invalid byte length");
     Ok(bytes
         .chunks_exact(8)
         .map(|b| i64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
@@ -316,10 +300,7 @@ fn bytes_to_i64(bytes: &Bytes) -> Result<Vec<i64>> {
 }
 
 fn bytes_to_i32(bytes: &Bytes) -> Result<Vec<i32>> {
-    ensure!(
-        bytes.len().is_multiple_of(4),
-        "i32 input has invalid byte length"
-    );
+    ensure!(bytes.len() % 4 == 0, "i32 input has invalid byte length");
     Ok(bytes
         .chunks_exact(4)
         .map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
