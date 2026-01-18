@@ -16,6 +16,8 @@ jobs:
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
+      - name: install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
       - name: fmt
         run: cargo fmt --all -- --check
@@ -39,6 +41,8 @@ jobs:
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
+      - name: install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
       - name: ort identity (cpu)
         run: cargo test -p kernelport-backend-ort --test identity

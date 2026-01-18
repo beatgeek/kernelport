@@ -22,5 +22,9 @@ pub enum Command {
         /// Device for inference (cpu or cuda:N)
         #[arg(long, default_value = "cpu")]
         device: String,
+
+        /// Path to ONNX model file
+        #[arg(long, default_value = "models/demo.onnx")]
+        model_path: String,
     },
 }

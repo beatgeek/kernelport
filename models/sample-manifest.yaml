@@ -1,0 +1,12 @@
+id: bert-base-uncased
+source:
+  kind: huggingface
+  repo: bert-base-uncased
+  revision: main
+format: onnx
+files:
+  - model.onnx
+cache:
+  dir: /models
+runtime:
+  device: cuda:0

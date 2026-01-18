@@ -8,6 +8,7 @@ use cli::{Cli, Command};
 use kernelport_proto::kernelport::v1::inference_service_server::InferenceServiceServer;
 use kernelport_runtime::{BatchPolicy, Batcher, Scheduler, Worker};
 use tokio::sync::mpsc;
+use tonic_reflection::server::Builder as ReflectionBuilder;
 use tracing_subscriber::EnvFilter;
 
 use grpc::GrpcSvc;
@@ -21,14 +22,20 @@ async fn main() -> Result<()> {
             grpc_addr,
             log,
             device,
+            model_path,
         } => {
             let device = parse_device(&device)?;
-            serve(grpc_addr, log, device).await
+            serve(grpc_addr, log, device, model_path.into()).await
         }
     }
 }
 
-async fn serve(grpc_addr: String, log: String, device: kernelport_core::Device) -> Result<()> {
+async fn serve(
+    grpc_addr: String,
+    log: String,
+    device: kernelport_core::Device,
+    model_path: std::path::PathBuf,
+) -> Result<()> {
     std::env::set_var("RUST_LOG", &log);
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
@@ -52,12 +59,7 @@ async fn serve(grpc_addr: String, log: String, device: kernelport_core::Device) 
 
     // Model registry
     let mut reg = registry::ModelRegistry::new();
-    reg.load_onnx(
-        "demo",
-        std::path::PathBuf::from("models/demo.onnx"),
-        device,
-    )
-    .ok(); // allow startup without the file for now
+    reg.load_onnx("demo", model_path, device).ok(); // allow startup without the file for now
 
     let loaded = reg.get("demo");
     let worker_model = DemoWorkerModel { loaded };
@@ -90,8 +92,14 @@ async fn serve(grpc_addr: String, log: String, device: kernelport_core::Device) 
     let svc = GrpcSvc { batcher_tx };
 
     tracing::info!(%addr, "kernelportd gRPC listening");
+    let reflection = ReflectionBuilder::configure()
+        .register_encoded_file_descriptor_set(kernelport_proto::FILE_DESCRIPTOR_SET)
+        .build_v1()
+        .map_err(|e| anyhow::anyhow!("reflection build failed: {e}"))?;
+
     tonic::transport::Server::builder()
         .add_service(InferenceServiceServer::new(svc))
+        .add_service(reflection)
         .serve(addr)
         .await?;
 
@@ -111,7 +119,6 @@ fn parse_device(raw: &str) -> Result<kernelport_core::Device> {
     anyhow::bail!("unsupported device: {raw} (expected cpu or cuda:N)");
 }
 
-use anyhow::anyhow;
 use kernelport_runtime::{BatchJob, WorkerModel};
 
 struct DemoWorkerModel {
@@ -120,25 +127,61 @@ struct DemoWorkerModel {
 
 impl WorkerModel for DemoWorkerModel {
     fn infer_batch(&mut self, job: BatchJob) -> anyhow::Result<()> {
-        let model = self
-            .loaded
-            .as_ref()
-            .ok_or_else(|| anyhow!("model not loaded (demo)"))?;
+        let model = match self.loaded.as_ref() {
+            Some(model) => model,
+            None => {
+                tracing::error!("model not loaded (demo)");
+                for req in job.requests {
+                    let _ = req.resp_tx.send(kernelport_runtime::InferenceResponse {
+                        outputs: Vec::new(),
+                        timings: kernelport_runtime::Timings {
+                            queued_us: 0,
+                            batched_us: 0,
+                            backend_us: 0,
+                        },
+                    });
+                }
+                return Ok(());
+            }
+        };
 
         // v0: no real batching; call model once and fan-out same output
         let mut guard = model.model.lock().unwrap();
 
         let t0 = std::time::Instant::now();
-        let outputs = guard.infer(job.merged_inputs.into_iter().map(|(_, t)| t).collect())?;
+        let outputs = match guard.infer(job.merged_inputs.into_iter().map(|(_, t)| t).collect()) {
+            Ok(outputs) => outputs,
+            Err(err) => {
+                tracing::error!(error = ?err, "model inference failed (demo)");
+                for req in job.requests {
+                    let _ = req.resp_tx.send(kernelport_runtime::InferenceResponse {
+                        outputs: Vec::new(),
+                        timings: kernelport_runtime::Timings {
+                            queued_us: 0,
+                            batched_us: 0,
+                            backend_us: 0,
+                        },
+                    });
+                }
+                return Ok(());
+            }
+        };
         let backend_us = t0.elapsed().as_micros() as u64;
 
+        let output_names = model.output_names.clone();
         for req in job.requests {
             let _ = req.resp_tx.send(kernelport_runtime::InferenceResponse {
                 outputs: outputs
                     .iter()
                     .cloned()
                     .enumerate()
-                    .map(|(i, t)| (kernelport_core::IOName(format!("out{}", i)), t))
+                    .map(|(i, t)| {
+                        let name = output_names
+                            .get(i)
+                            .cloned()
+                            .unwrap_or_else(|| kernelport_core::IOName(format!("out{}", i)));
+                        (name, t)
+                    })
                     .collect(),
                 timings: kernelport_runtime::Timings {
                     queued_us: 0,

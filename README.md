@@ -104,3 +104,94 @@ KernelPort supports CUDA via ONNX Runtime. For GPU inference:
 - Set `ORT_DYLIB_PATH` to the CUDA-enabled `libonnxruntime.so`.
 - Build with the CUDA feature and select a device:
   - `cargo run -p kernelport-server --features ort-cuda -- serve --device cuda:0`
+
+---
+
+## Containers (CPU and GPU)
+
+KernelPort ships with separate Dockerfiles for CPU and GPU runtime environments:
+
+- `Dockerfile.cpu` builds a CPU-only image intended for local dev or CPU deployments.
+- `Dockerfile.gpu` builds a GPU-ready image that expects CUDA + TensorRT on the host.
+  - Base image: `nvidia/cuda:12.2.0-runtime-ubuntu22.04`
+
+The GPU image is designed for "bring your own kernel" by letting you mount a
+CUDA-enabled ONNX Runtime shared library at runtime:
+
+- Mount your `libonnxruntime.so` and set `ORT_DYLIB_PATH`.
+- Run with `--gpus` and choose `--device cuda:N`.
+
+### Recommended NVIDIA stack
+
+- Driver: 535+ (or newer)
+- CUDA: 12.2
+- cuDNN: 8.9
+- TensorRT: 8.6
+
+### Build
+
+```bash
+docker build -f Dockerfile.cpu -t kernelport:cpu .
+docker build -f Dockerfile.gpu -t kernelport:gpu .
+```
+
+### Run (CPU)
+
+```bash
+docker run --rm -p 8080:8080 kernelport:cpu --device cpu
+```
+
+### Run (CPU + HF pull)
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e MODEL_MANIFEST_PATH=/app/models/manifest.yaml \
+  -e HF_TOKEN=your_hf_token \
+  -v /path/to/manifest.yaml:/app/models/manifest.yaml:ro \
+  -v /path/to/model-cache:/models \
+  kernelport:cpu --device cpu --model-path /models/bert-base-uncased/model.onnx
+```
+
+### Run (GPU)
+
+```bash
+docker run --rm --gpus all \
+  -e ORT_DYLIB_PATH=/opt/ort/libonnxruntime.so \
+  -v /path/to/ort/libonnxruntime.so:/opt/ort/libonnxruntime.so:ro \
+  -p 8080:8080 \
+  kernelport:gpu --device cuda:0 --model-path /models/bert-base-uncased/model.onnx
+```
+
+### Run (GPU + HF pull)
+
+```bash
+docker run --rm --gpus all \
+  -e ORT_DYLIB_PATH=/opt/ort/libonnxruntime.so \
+  -e MODEL_MANIFEST_PATH=/app/models/manifest.yaml \
+  -e HF_TOKEN=your_hf_token \
+  -v /path/to/ort/libonnxruntime.so:/opt/ort/libonnxruntime.so:ro \
+  -v /path/to/manifest.yaml:/app/models/manifest.yaml:ro \
+  -v /path/to/model-cache:/models \
+  -p 8080:8080 \
+  kernelport:gpu --device cuda:0 --model-path /models/bert-base-uncased/model.onnx
+```
+
+See `docs/model-ingestion.md` for the HuggingFace model ingestion plan and
+`docs/model-manifest.md` for the proposed manifest schema.
+
+Validation steps are in `docs/validation.md`.
+
+## Pre-commit (local)
+
+Install pre-commit and enable the hook:
+
+```bash
+pipx install pre-commit
+pre-commit install
+```
+
+Run on demand:
+
+```bash
+pre-commit run --all-files
+```

@@ -9,8 +9,7 @@ use kernelport_core::{
 
 #[test]
 fn ort_identity_cpu() -> Result<()> {
-    let model_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../models/identity.onnx");
+    let model_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../models/identity.onnx");
 
     let backend = OrtBackend::new();
     let mut model = backend.load(&ModelArtifact::OnnxPath(model_path), Device::Cpu)?;
@@ -33,7 +32,11 @@ fn ort_identity_cpu() -> Result<()> {
 
     let numel = shape.iter().product::<usize>().max(1);
     let data: Vec<f32> = (0..numel).map(|i| i as f32).collect();
-    let input = Tensor::from_cpu_bytes(DType::F32, Shape::from_slice(&shape), bytes_from_slice(&data));
+    let input = Tensor::from_cpu_bytes(
+        DType::F32,
+        Shape::from_slice(&shape),
+        bytes_from_slice(&data),
+    );
 
     let outputs = model.infer(vec![input])?;
     let out = outputs.first().context("missing model output")?;
