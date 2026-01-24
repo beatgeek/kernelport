@@ -53,6 +53,69 @@ This ensures you get:
 - Framework correctness
 - No silent performance regressions
 
+### Helion (Experimental)
+KernelPort can proxy Helion kernels via a Python sidecar. This keeps the Rust
+server lean while letting MLEs author kernels in Helion (higher-level Triton with
+autotuning).
+
+Sidecar flow (v0):
+- Run the Helion gRPC worker in Python (see `scripts/helion/helion_worker.py`).
+- Start kernelportd with `--backend helion --helion-addr http://127.0.0.1:50061`.
+- Send standard KernelPort gRPC requests to `kernelportd`; it forwards to Helion.
+- Expect a first-run autotune warm-up (can be minutes depending on kernel/search).
+
+Planned follow-up:
+- Optional in-process Helion embedding (pyo3) for lower per-request latency.
+
+Helion worker Python deps (uv):
+```bash
+uv venv .venv
+source .venv/bin/activate
+uv pip install "torch==2.9.*" --index-url https://download.pytorch.org/whl/cu126
+uv pip install helion grpcio grpcio-tools numpy
+```
+
+Helion sidecar (Docker) build/run:
+```bash
+docker build -f Dockerfile.gpu -t kernelport:gpu .
+docker build -f Dockerfile.helion -t kernelport-helion:gpu .
+docker compose up --build
+```
+
+Bring it down:
+```bash
+docker compose down
+```
+
+GPU pinning and cache:
+- Pin GPUs with `CUDA_VISIBLE_DEVICES` in each container (e.g. helion worker uses `0`, kernelport uses `0` or a different GPU).
+- Persist Helion autotune artifacts by mounting a volume to the worker cache dir (e.g. set `XDG_CACHE_HOME=/cache` and mount `-v /path/to/cache:/cache`).
+
+Example request (replace base64 data as needed):
+```bash
+grpcurl -plaintext -d '{
+  "model": "demo",
+  "inputs": [
+    { "name": "x", "dtype": "F16", "shape": [4, 8], "data": "<BASE64>" }
+  ]
+}' localhost:50051 kernelport.v1.InferenceService/Infer
+```
+
+Generate base64 payload:
+```bash
+python - <<'PY'
+import base64
+import torch
+x = torch.randn(4, 8, dtype=torch.float16)
+print(base64.b64encode(x.numpy().tobytes()).decode())
+PY
+```
+
+CPU-only mock Helion (Docker, see `scripts/helion/mock/`):
+```bash
+docker compose -f docker-compose.mock.yml up --build
+```
+
 ---
 
 ### Dynamic Batching

@@ -1,0 +1,21 @@
+version: "3.8"
+
+services:
+  helion-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.helion.mock
+    ports:
+      - "50061:50061"
+    environment:
+      KERNELPORT_REPO_ROOT: "/app"
+
+  kernelport:
+    build:
+      context: .
+      dockerfile: Dockerfile.cpu
+    ports:
+      - "50051:50051"
+    depends_on:
+      - helion-worker
+    command: ["--backend", "helion", "--device", "cpu", "--helion-addr", "http://helion-worker:50061", "--helion-model", "softmax_mock"]

@@ -1,0 +1,32 @@
+version: "3.8"
+
+services:
+  helion-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.helion
+    ports:
+      - "50061:50061"
+    environment:
+      CUDA_VISIBLE_DEVICES: "0"
+      XDG_CACHE_HOME: "/cache"
+      KERNELPORT_REPO_ROOT: "/app"
+    volumes:
+      - ./helion-cache:/cache
+    device_requests:
+      - driver: nvidia
+        count: 1
+        capabilities: ["gpu"]
+    command: ["python", "/app/scripts/helion/helion_worker.py", "--addr", "0.0.0.0:50061", "--device", "cuda"]
+
+  kernelport:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+    ports:
+      - "50051:50051"
+    environment:
+      CUDA_VISIBLE_DEVICES: "0"
+    depends_on:
+      - helion-worker
+    command: ["--backend", "helion", "--device", "cuda:0", "--helion-addr", "http://helion-worker:50061", "--helion-model", "softmax_two_pass"]

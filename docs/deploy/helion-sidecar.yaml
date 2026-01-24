@@ -1,0 +1,50 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kernelport-helion
+  labels:
+    app: kernelport-helion
+spec:
+  containers:
+    - name: kernelport
+      image: kernelport:gpu
+      args:
+        - "--backend"
+        - "helion"
+        - "--device"
+        - "cuda:0"
+        - "--helion-addr"
+        - "http://127.0.0.1:50061"
+        - "--helion-model"
+        - "softmax_two_pass"
+      ports:
+        - containerPort: 50051
+      env:
+        - name: RUST_LOG
+          value: info
+    - name: helion-worker
+      image: kernelport-helion:gpu
+      args:
+        - "python"
+        - "/app/scripts/helion/helion_worker.py"
+        - "--addr"
+        - "0.0.0.0:50061"
+        - "--device"
+        - "cuda"
+      ports:
+        - containerPort: 50061
+      resources:
+        limits:
+          nvidia.com/gpu: 1
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kernelport-helion
+spec:
+  selector:
+    app: kernelport-helion
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: 50051

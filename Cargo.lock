@@ -628,6 +628,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92ecc6618181def0457392ccd0ee51198e065e016d1d527a7ac1b6dc7c1f09d2"
 
 [[package]]
+name = "kernelport-backend-helion"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "kernelport-core",
+ "kernelport-proto",
+ "tokio",
+ "tonic",
+]
+
+[[package]]
 name = "kernelport-backend-ort"
 version = "0.0.0"
 dependencies = [
@@ -674,6 +686,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "clap",
+ "kernelport-backend-helion",
  "kernelport-backend-ort",
  "kernelport-core",
  "kernelport-proto",
