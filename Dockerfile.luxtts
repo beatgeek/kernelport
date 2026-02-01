@@ -1,0 +1,38 @@
+# LuxTTS gRPC worker (Helion-style sidecar). Loads YatharthS/LuxTTS from HF.
+# Uses uv for consistency with Dockerfile.helion.
+FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        git \
+        python3 \
+        python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/venv/bin:/root/.local/bin:${PATH}"
+
+WORKDIR /app
+
+# Clone LuxTTS so zipvoice.luxvoice is available; install its deps with uv
+RUN git clone --depth 1 https://github.com/ysharma3501/LuxTTS.git /app/LuxTTS
+RUN uv venv /opt/venv \
+    && uv pip install -r /app/LuxTTS/requirements.txt
+
+# gRPC and proto for kernelport InferenceService
+RUN uv pip install grpcio grpcio-tools
+
+COPY scripts/luxtts /app/scripts/luxtts
+COPY crates/kernelport-proto/src /app/crates/kernelport-proto/src
+
+ENV LUXTTS_REPO=/app/LuxTTS
+ENV KERNELPORT_REPO_ROOT=/app
+ENV PYTHONPATH=/app/LuxTTS:/app
+
+EXPOSE 50061
+
+CMD ["python", "/app/scripts/luxtts/luxtts_worker.py", "--addr", "0.0.0.0:50061", "--device", "cuda"]

@@ -151,6 +151,22 @@ The scheduler can be tuned for:
 
 ## Local Development
 
+### Local Python (venv)
+
+For the Python pieces (e.g. `make test-python`, pre-commit Python hook, `model_fetch.py`, or
+Helion/LuxTTS workers), use a venv so your system Python setup doesn't conflict:
+
+```bash
+uv venv .venv
+source .venv/bin/activate   # or  .venv\Scripts\activate  on Windows
+uv pip install pyyaml
+```
+
+Then run `make test-python` or `pre-commit run --all-files`; the hook will use the active venv.
+To run the Helion worker locally, add: `uv pip install "torch==2.9.*" helion grpcio grpcio-tools numpy`
+(see Helion section for PyTorch index). For LuxTTS, use the Docker setup or install from the
+LuxTTS repo requirements.
+
 ### CPU (macOS or Linux)
 
 - Install Rust components: `rustup component add rustfmt clippy`
@@ -244,6 +260,41 @@ See `docs/model-ingestion.md` for the HuggingFace model ingestion plan and
 
 Validation steps are in `docs/validation.md`.
 
+### Deployments and secrets
+
+For deployment options (LuxTTS, Lambda Cloud, GHCR) and required secrets, see
+[docs/deployments.md](docs/deployments.md). Summary:
+
+- **LuxTTS**: Set `HUGGINGFACE_HUB_TOKEN` (or `HF_TOKEN`) when running the LuxTTS worker.
+- **Lambda Cloud deploy** (GitHub Actions): Add repository secrets
+  **LAMBDA_CLOUD_API_KEY** and **HUGGINGFACE_HUB_TOKEN** in
+  Settings → Secrets and variables → Actions.
+
+### Deploy to Lambda Cloud
+
+The GitHub Actions workflow **Deploy to Lambda Cloud** builds the kernelport and LuxTTS
+images, pushes them to GHCR, and launches a GPU instance on [Lambda Cloud](https://cloud.lambda.ai/).
+
+1. **Secrets** (one-time): In the repo go to **Settings → Secrets and variables → Actions**.
+   Add **LAMBDA_CLOUD_API_KEY** and **HUGGINGFACE_HUB_TOKEN**.
+
+2. **SSH key** (one-time): In [Lambda Cloud SSH keys](https://cloud.lambda.ai/ssh-keys), add
+   an SSH key and note its **name** (e.g. `macbook-pro`). The workflow needs this name.
+
+3. **Run the workflow**: Push your branch, then go to **Actions → Deploy to Lambda Cloud →
+   Run workflow**. Fill the inputs:
+   - **instance_type_name**: e.g. `gpu_1x_a100` (see [Lambda instance types](https://cloud.lambda.ai/instances)).
+   - **region_name**: e.g. `us-tx-1`.
+   - **ssh_key_name**: the exact name of your SSH key from step 2 (required).
+
+4. **After the run**: The job summary shows the **instance ID** and **public IP**. SSH into
+   the instance and run your stack (e.g. pull images from GHCR and run docker compose with
+   `HUGGINGFACE_HUB_TOKEN`). The gRPC inference endpoint is **`<instance-ip>:50051`** once
+   the stack is running.
+
+See [.github/workflows/deploy-lambda.yml](.github/workflows/deploy-lambda.yml) and
+[docs/deployments.md](docs/deployments.md) for details.
+
 ## Pre-commit (local)
 
 Install pre-commit and enable the hook:
@@ -253,8 +304,13 @@ pipx install pre-commit
 pre-commit install
 ```
 
+Hooks run: `cargo fmt`, `cargo test --all`, and Python script tests (`manifest_to_serve_args`).
+The Python hook requires PyYAML; using a venv is recommended (see [Local Python (venv)](#local-python-venv)).
+
 Run on demand:
 
 ```bash
 pre-commit run --all-files
 ```
+
+Run only Python script tests: `make test-python` (requires PyYAML).

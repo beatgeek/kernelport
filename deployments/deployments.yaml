@@ -1,0 +1,19 @@
+# Deployment name -> manifest, backend, optional worker image.
+# Used by CI/Lambda and docs to know how to run each deployment.
+deployments:
+  identity-onnx:
+    manifest: models/sample-manifest.yaml
+    backend: onnx
+    worker_image: null
+
+  helion-demo:
+    manifest: null
+    backend: helion
+    helion_model: softmax_two_pass
+    worker_image: kernelport-helion:gpu
+
+  luxtts:
+    manifest: models/luxtts-manifest.yaml
+    backend: helion
+    helion_model: luxtts
+    worker_image: kernelport-luxtts:gpu

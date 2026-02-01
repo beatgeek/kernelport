@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: fmt clippy test build check run help
+.PHONY: fmt clippy test test-python build check run help
 
 PROJECT_NAME := kernelport
 PROJECT_VERSION := $(shell cargo pkgid -p kernelport-server 2>/dev/null | sed -E 's/.*@//')
@@ -16,10 +16,13 @@ clippy:
 test:
 	cargo test --all
 
+test-python:
+	python3 tests/test_manifest_serve_args.py
+
 build:
 	cargo build --all
 
-check: fmt clippy test build
+check: fmt clippy test test-python build
 
 run:
 	RUST_LOG=info cargo run -p kernelport-server
@@ -28,9 +31,10 @@ help:
 	@printf "%s\n" \
 		"$(PROJECT_NAME) $(PROJECT_VERSION)" \
 		"Targets:" \
-		"  fmt    - Run rustfmt" \
-		"  clippy - Run clippy with warnings denied" \
-		"  test   - Run tests" \
-		"  build  - Build all crates" \
-		"  check  - Run fmt, clippy, test, build" \
-		"  run    - Run kernelport-server"
+		"  fmt         - Run rustfmt" \
+		"  clippy      - Run clippy with warnings denied" \
+		"  test        - Run Rust tests" \
+		"  test-python - Run Python script tests (manifest_to_serve_args)" \
+		"  build       - Build all crates" \
+		"  check       - Run fmt, clippy, test, test-python, build" \
+		"  run         - Run kernelport-server"

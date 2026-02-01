@@ -7,3 +7,15 @@ repos:
         language: system
         types: [rust]
         pass_filenames: false
+
+      - id: cargo-test
+        name: cargo test
+        entry: cargo test --all
+        language: system
+        pass_filenames: false
+
+      - id: python-scripts
+        name: Python script tests (manifest_to_serve_args)
+        entry: python tests/test_manifest_serve_args.py
+        language: system
+        pass_filenames: false
