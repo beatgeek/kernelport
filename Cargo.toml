@@ -7,7 +7,7 @@ members = [
   "crates/kernelport-core",
   "crates/kernelport-runtime",
   "crates/kernelport-backend-ort",
+  "crates/kernelport-backend-helion",
   "crates/kernelport-proto",
   "crates/kernelport-server",
 ]
-

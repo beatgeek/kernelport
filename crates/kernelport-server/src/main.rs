@@ -22,10 +22,22 @@ async fn main() -> Result<()> {
             grpc_addr,
             log,
             device,
+            backend,
             model_path,
+            helion_addr,
+            helion_model,
         } => {
             let device = parse_device(&device)?;
-            serve(grpc_addr, log, device, model_path.into()).await
+            serve(
+                grpc_addr,
+                log,
+                device,
+                backend,
+                model_path.into(),
+                helion_addr,
+                helion_model,
+            )
+            .await
         }
     }
 }
@@ -34,7 +46,10 @@ async fn serve(
     grpc_addr: String,
     log: String,
     device: kernelport_core::Device,
+    backend: String,
     model_path: std::path::PathBuf,
+    helion_addr: String,
+    helion_model: String,
 ) -> Result<()> {
     std::env::set_var("RUST_LOG", &log);
     tracing_subscriber::fmt()
@@ -59,7 +74,18 @@ async fn serve(
 
     // Model registry
     let mut reg = registry::ModelRegistry::new();
-    reg.load_onnx("demo", model_path, device).ok(); // allow startup without the file for now
+    match backend.as_str() {
+        "onnx" => {
+            reg.load_onnx("demo", model_path, device).ok();
+        }
+        "helion" => {
+            reg.load_helion("demo", helion_addr, helion_model, device)
+                .ok();
+        }
+        other => {
+            anyhow::bail!("unsupported backend: {other} (expected onnx or helion)");
+        }
+    }
 
     let loaded = reg.get("demo");
     let worker_model = DemoWorkerModel { loaded };

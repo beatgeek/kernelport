@@ -1,0 +1,127 @@
+# Deploy KernelPort (LuxTTS) to Lambda Cloud: build/push images to GHCR, launch GPU instance.
+# Trigger: workflow_dispatch. Requires repository secrets: LAMBDA_CLOUD_API_KEY, HUGGINGFACE_HUB_TOKEN.
+# You must add an SSH key in Lambda Cloud (https://cloud.lambda.ai/ssh-keys) and pass its name as input.
+name: Deploy to Lambda Cloud
+
+on:
+  workflow_dispatch:
+    inputs:
+      instance_type_name:
+        description: "Lambda instance type (e.g. gpu_1x_a100)"
+        required: true
+        default: "gpu_1x_a100"
+      region_name:
+        description: "Lambda region (e.g. us-tx-1)"
+        required: true
+        default: "us-tx-1"
+      ssh_key_name:
+        description: "Name of SSH key already added in Lambda Cloud"
+        required: true
+
+env:
+  LAMBDA_API_BASE: "https://cloud.lambdalabs.com/api/v1"
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push kernelport (GPU)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.gpu
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/kernelport:gpu,ghcr.io/${{ github.repository_owner }}/kernelport:gpu-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push kernelport-luxtts (GPU)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.luxtts
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/kernelport-luxtts:gpu,ghcr.io/${{ github.repository_owner }}/kernelport-luxtts:gpu-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  launch:
+    needs: build-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: List instance types (optional)
+        run: |
+          curl -sSf -u "${{ secrets.LAMBDA_CLOUD_API_KEY }}:" \
+            "${{ env.LAMBDA_API_BASE }}/instance-types" | jq -r '.data | keys[]' | head -20
+
+      - name: Launch instance
+        id: launch
+        run: |
+          body=$(jq -n \
+            --arg region "${{ github.event.inputs.region_name }}" \
+            --arg type "${{ github.event.inputs.instance_type_name }}" \
+            --arg key "${{ github.event.inputs.ssh_key_name }}" \
+            '{region_name: $region, instance_type_name: $type, ssh_key_names: [$key]}')
+          resp=$(curl -sSf -u "${{ secrets.LAMBDA_CLOUD_API_KEY }}:" \
+            -X POST "${{ env.LAMBDA_API_BASE }}/instance-operations/launch" \
+            -H "Content-Type: application/json" \
+            -d "$body")
+          echo "instance_ids=$(echo "$resp" | jq -r '.data.instance_ids[0]')" >> $GITHUB_OUTPUT
+          echo "$resp" | jq .
+
+      - name: Poll until instance is active
+        id: poll
+        run: |
+          id="${{ steps.launch.outputs.instance_ids }}"
+          for i in $(seq 1 30); do
+            resp=$(curl -sSf -u "${{ secrets.LAMBDA_CLOUD_API_KEY }}:" \
+              "${{ env.LAMBDA_API_BASE }}/instances/$id")
+            status=$(echo "$resp" | jq -r '.data.status')
+            ip=$(echo "$resp" | jq -r '.data.ip // empty')
+            echo "Attempt $i: status=$status ip=$ip"
+            if [ "$status" = "active" ] && [ -n "$ip" ]; then
+              echo "instance_ip=$ip" >> $GITHUB_OUTPUT
+              echo "Instance is up at $ip"
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "Instance did not become active in time"
+          exit 1
+
+      - name: Smoke test (grpcurl)
+        continue-on-error: true
+        run: |
+          ip="${{ steps.poll.outputs.instance_ip }}"
+          if [ -z "$ip" ]; then exit 0; fi
+          # Instance may not have the stack running yet; user can SSH and run docker compose
+          if command -v grpcurl >/dev/null 2>&1; then
+            grpcurl -plaintext -connect-timeout 5 "$ip:50051" list || true
+          else
+            echo "grpcurl not installed; skip smoke test. Endpoint: $ip:50051"
+          fi
+
+      - name: Summary
+        run: |
+          echo "## Lambda Cloud instance" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Instance ID**: ${{ steps.launch.outputs.instance_ids }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **IP**: ${{ steps.poll.outputs.instance_ip }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **gRPC endpoint**: ${{ steps.poll.outputs.instance_ip }}:50051 (after you deploy the stack on the instance)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "SSH into the instance and run your stack (e.g. docker compose). Set \`HUGGINGFACE_HUB_TOKEN\` when running the LuxTTS worker." >> $GITHUB_STEP_SUMMARY

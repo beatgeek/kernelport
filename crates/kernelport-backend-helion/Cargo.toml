@@ -1,0 +1,12 @@
+[package]
+name = "kernelport-backend-helion"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+bytes = "1"
+kernelport-core = { path = "../kernelport-core" }
+kernelport-proto = { path = "../kernelport-proto" }
+tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread"] }
+tonic = { version = "0.14", features = ["transport"] }

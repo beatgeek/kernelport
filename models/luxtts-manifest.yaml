@@ -1,0 +1,11 @@
+id: luxtts
+source:
+  kind: huggingface
+  repo: YatharthS/LuxTTS
+  revision: main
+format: python
+backend: helion
+cache:
+  dir: /models
+runtime:
+  device: cuda:0

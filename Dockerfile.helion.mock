@@ -1,0 +1,25 @@
+FROM python:3.11-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+
+ENV PATH="/root/.local/bin:/root/.cargo/bin:${PATH}"
+
+WORKDIR /app
+COPY scripts/helion /app/scripts/helion
+COPY crates/kernelport-proto/src /app/crates/kernelport-proto/src
+
+RUN /root/.local/bin/uv venv /app/.venv \
+    && . /app/.venv/bin/activate \
+    && /root/.local/bin/uv pip install numpy grpcio grpcio-tools
+
+ENV PATH="/app/.venv/bin:${PATH}"
+
+EXPOSE 50061
+
+CMD ["python", "/app/scripts/helion/mock/helion_worker_mock.py", "--addr", "0.0.0.0:50061"]

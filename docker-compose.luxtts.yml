@@ -1,0 +1,23 @@
+# Override to run LuxTTS worker instead of Helion demo worker.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.luxtts.yml up --build
+# Set HUGGINGFACE_HUB_TOKEN (or HF_TOKEN) so the LuxTTS worker can pull the model.
+version: "3.8"
+
+services:
+  helion-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.luxtts
+    image: kernelport-luxtts:gpu
+    environment:
+      CUDA_VISIBLE_DEVICES: "0"
+      KERNELPORT_REPO_ROOT: "/app"
+      LUXTTS_REPO: "/app/LuxTTS"
+      HUGGINGFACE_HUB_TOKEN: ${HUGGINGFACE_HUB_TOKEN:-}
+      HF_TOKEN: ${HF_TOKEN:-}
+    command: ["python", "/app/scripts/luxtts/luxtts_worker.py", "--addr", "0.0.0.0:50061", "--device", "cuda", "--model-name", "luxtts"]
+
+  kernelport:
+    command: ["--backend", "helion", "--device", "cuda:0", "--helion-addr", "http://helion-worker:50061", "--helion-model", "luxtts"]
+    depends_on:
+      - helion-worker

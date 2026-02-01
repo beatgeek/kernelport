@@ -4,4 +4,5 @@ pub enum ModelArtifact {
     TensorRtEnginePath(std::path::PathBuf),
     TorchScriptPath(std::path::PathBuf),
     TfSavedModelDir(std::path::PathBuf),
+    HelionGrpc { addr: String, model: String },
 }

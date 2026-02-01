@@ -46,3 +46,14 @@ jobs:
 
       - name: ort identity (cpu)
         run: cargo test -p kernelport-backend-ort --test identity
+
+  python-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install PyYAML
+        run: pip install pyyaml
+
+      - name: manifest_to_serve_args tests
+        run: python tests/test_manifest_serve_args.py

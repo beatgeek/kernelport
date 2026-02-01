@@ -53,6 +53,69 @@ This ensures you get:
 - Framework correctness
 - No silent performance regressions
 
+### Helion (Experimental)
+KernelPort can proxy Helion kernels via a Python sidecar. This keeps the Rust
+server lean while letting MLEs author kernels in Helion (higher-level Triton with
+autotuning).
+
+Sidecar flow (v0):
+- Run the Helion gRPC worker in Python (see `scripts/helion/helion_worker.py`).
+- Start kernelportd with `--backend helion --helion-addr http://127.0.0.1:50061`.
+- Send standard KernelPort gRPC requests to `kernelportd`; it forwards to Helion.
+- Expect a first-run autotune warm-up (can be minutes depending on kernel/search).
+
+Planned follow-up:
+- Optional in-process Helion embedding (pyo3) for lower per-request latency.
+
+Helion worker Python deps (uv):
+```bash
+uv venv .venv
+source .venv/bin/activate
+uv pip install "torch==2.9.*" --index-url https://download.pytorch.org/whl/cu126
+uv pip install helion grpcio grpcio-tools numpy
+```
+
+Helion sidecar (Docker) build/run:
+```bash
+docker build -f Dockerfile.gpu -t kernelport:gpu .
+docker build -f Dockerfile.helion -t kernelport-helion:gpu .
+docker compose up --build
+```
+
+Bring it down:
+```bash
+docker compose down
+```
+
+GPU pinning and cache:
+- Pin GPUs with `CUDA_VISIBLE_DEVICES` in each container (e.g. helion worker uses `0`, kernelport uses `0` or a different GPU).
+- Persist Helion autotune artifacts by mounting a volume to the worker cache dir (e.g. set `XDG_CACHE_HOME=/cache` and mount `-v /path/to/cache:/cache`).
+
+Example request (replace base64 data as needed):
+```bash
+grpcurl -plaintext -d '{
+  "model": "demo",
+  "inputs": [
+    { "name": "x", "dtype": "F16", "shape": [4, 8], "data": "<BASE64>" }
+  ]
+}' localhost:50051 kernelport.v1.InferenceService/Infer
+```
+
+Generate base64 payload:
+```bash
+python - <<'PY'
+import base64
+import torch
+x = torch.randn(4, 8, dtype=torch.float16)
+print(base64.b64encode(x.numpy().tobytes()).decode())
+PY
+```
+
+CPU-only mock Helion (Docker, see `scripts/helion/mock/`):
+```bash
+docker compose -f docker-compose.mock.yml up --build
+```
+
 ---
 
 ### Dynamic Batching
@@ -87,6 +150,22 @@ The scheduler can be tuned for:
 ---
 
 ## Local Development
+
+### Local Python (venv)
+
+For the Python pieces (e.g. `make test-python`, pre-commit Python hook, `model_fetch.py`, or
+Helion/LuxTTS workers), use a venv so your system Python setup doesn't conflict:
+
+```bash
+uv venv .venv
+source .venv/bin/activate   # or  .venv\Scripts\activate  on Windows
+uv pip install pyyaml
+```
+
+Then run `make test-python` or `pre-commit run --all-files`; the hook will use the active venv.
+To run the Helion worker locally, add: `uv pip install "torch==2.9.*" helion grpcio grpcio-tools numpy`
+(see Helion section for PyTorch index). For LuxTTS, use the Docker setup or install from the
+LuxTTS repo requirements.
 
 ### CPU (macOS or Linux)
 
@@ -181,6 +260,41 @@ See `docs/model-ingestion.md` for the HuggingFace model ingestion plan and
 
 Validation steps are in `docs/validation.md`.
 
+### Deployments and secrets
+
+For deployment options (LuxTTS, Lambda Cloud, GHCR) and required secrets, see
+[docs/deployments.md](docs/deployments.md). Summary:
+
+- **LuxTTS**: Set `HUGGINGFACE_HUB_TOKEN` (or `HF_TOKEN`) when running the LuxTTS worker.
+- **Lambda Cloud deploy** (GitHub Actions): Add repository secrets
+  **LAMBDA_CLOUD_API_KEY** and **HUGGINGFACE_HUB_TOKEN** in
+  Settings → Secrets and variables → Actions.
+
+### Deploy to Lambda Cloud
+
+The GitHub Actions workflow **Deploy to Lambda Cloud** builds the kernelport and LuxTTS
+images, pushes them to GHCR, and launches a GPU instance on [Lambda Cloud](https://cloud.lambda.ai/).
+
+1. **Secrets** (one-time): In the repo go to **Settings → Secrets and variables → Actions**.
+   Add **LAMBDA_CLOUD_API_KEY** and **HUGGINGFACE_HUB_TOKEN**.
+
+2. **SSH key** (one-time): In [Lambda Cloud SSH keys](https://cloud.lambda.ai/ssh-keys), add
+   an SSH key and note its **name** (e.g. `macbook-pro`). The workflow needs this name.
+
+3. **Run the workflow**: Push your branch, then go to **Actions → Deploy to Lambda Cloud →
+   Run workflow**. Fill the inputs:
+   - **instance_type_name**: e.g. `gpu_1x_a100` (see [Lambda instance types](https://cloud.lambda.ai/instances)).
+   - **region_name**: e.g. `us-tx-1`.
+   - **ssh_key_name**: the exact name of your SSH key from step 2 (required).
+
+4. **After the run**: The job summary shows the **instance ID** and **public IP**. SSH into
+   the instance and run your stack (e.g. pull images from GHCR and run docker compose with
+   `HUGGINGFACE_HUB_TOKEN`). The gRPC inference endpoint is **`<instance-ip>:50051`** once
+   the stack is running.
+
+See [.github/workflows/deploy-lambda.yml](.github/workflows/deploy-lambda.yml) and
+[docs/deployments.md](docs/deployments.md) for details.
+
 ## Pre-commit (local)
 
 Install pre-commit and enable the hook:
@@ -190,8 +304,13 @@ pipx install pre-commit
 pre-commit install
 ```
 
+Hooks run: `cargo fmt`, `cargo test --all`, and Python script tests (`manifest_to_serve_args`).
+The Python hook requires PyYAML; using a venv is recommended (see [Local Python (venv)](#local-python-venv)).
+
 Run on demand:
 
 ```bash
 pre-commit run --all-files
 ```
+
+Run only Python script tests: `make test-python` (requires PyYAML).

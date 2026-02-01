@@ -21,6 +21,7 @@ kernelport-core = { path = "../kernelport-core" }
 kernelport-runtime = { path = "../kernelport-runtime" }
 kernelport-proto = { path = "../kernelport-proto" }
 kernelport-backend-ort = { path = "../kernelport-backend-ort" }
+kernelport-backend-helion = { path = "../kernelport-backend-helion" }
 
 [features]
 ort-cuda = ["kernelport-backend-ort/cuda"]
