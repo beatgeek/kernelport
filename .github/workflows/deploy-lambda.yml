@@ -80,8 +80,8 @@ jobs:
           curl -sSf -u "${{ secrets.LAMBDA_CLOUD_API_KEY }}:" \
             "${{ env.LAMBDA_API_BASE }}/instance-types" | jq -r '.data | keys[]' | head -20
 
-      - name: Launch instance
-        id: launch
+      - name: Create or select filesystem
+        id: filesystem
         run: |
           fs_id="${{ github.event.inputs.filesystem_id }}"
           if [ -z "$fs_id" ]; then
@@ -97,8 +97,13 @@ jobs:
               -d "$fs_body")
             fs_id=$(echo "$fs_resp" | jq -r '.data.id')
             if [ -z "$fs_id" ] || [ "$fs_id" = "null" ]; then
-              echo "Filesystem creation failed"
-              echo "$fs_resp" | jq .
+              err_msg=$(echo "$fs_resp" | jq -r '.error // .errors[0].message // .message // empty')
+              if [ -n "$err_msg" ] && [ "$err_msg" != "null" ]; then
+                echo "Filesystem creation failed: $err_msg"
+              else
+                echo "Filesystem creation failed; raw response:"
+              fi
+              echo "$fs_resp" | jq . || echo "$fs_resp"
               exit 1
             fi
             echo "Created filesystem $fs_id ($fs_name)"
@@ -107,6 +112,10 @@ jobs:
           fi
           echo "filesystem_id=$fs_id" >> $GITHUB_OUTPUT
 
+      - name: Launch instance
+        id: launch
+        run: |
+          fs_id="${{ steps.filesystem.outputs.filesystem_id }}"
           body=$(jq -n \
             --arg region "${{ github.event.inputs.region_name }}" \
             --arg type "${{ github.event.inputs.instance_type_name }}" \
@@ -157,7 +166,7 @@ jobs:
           echo "## Lambda Cloud instance" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Instance ID**: ${{ steps.launch.outputs.instance_ids }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Filesystem ID**: ${{ steps.launch.outputs.filesystem_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Filesystem ID**: ${{ steps.filesystem.outputs.filesystem_id }}" >> $GITHUB_STEP_SUMMARY
           echo "- **IP**: ${{ steps.poll.outputs.instance_ip }}" >> $GITHUB_STEP_SUMMARY
           echo "- **gRPC endpoint**: ${{ steps.poll.outputs.instance_ip }}:50051 (after you deploy the stack on the instance)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
