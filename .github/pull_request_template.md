@@ -8,8 +8,8 @@
 - Not run (reason: )
 
 ## Review focus
-- Rust runtime paths
-- Helion sidecar/worker integration
+- (list any areas where reviewers should pay extra attention, e.g., performance hot paths, API changes, error handling)
+- 
 
 ## Rollout / Notes
 - 
