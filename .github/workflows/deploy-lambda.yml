@@ -101,9 +101,9 @@ jobs:
               if [ -n "$err_msg" ] && [ "$err_msg" != "null" ]; then
                 echo "Filesystem creation failed: $err_msg"
               else
-                echo "Filesystem creation failed; raw response:"
+                echo "Filesystem creation failed; could not extract error message. Full response:"
+                echo "$fs_resp" | jq . || echo "$fs_resp"
               fi
-              echo "$fs_resp" | jq . || echo "$fs_resp"
               exit 1
             fi
             echo "Created filesystem $fs_id ($fs_name)"
