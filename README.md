@@ -286,11 +286,19 @@ images, pushes them to GHCR, and launches a GPU instance on [Lambda Cloud](https
    - **instance_type_name**: e.g. `gpu_1x_a100` (see [Lambda instance types](https://cloud.lambda.ai/instances)).
    - **region_name**: e.g. `us-tx-1`.
    - **ssh_key_name**: the exact name of your SSH key from step 2 (required).
+   - **filesystem_id** (optional): attach an existing filesystem ID instead of creating a new one.
+   - **filesystem_name_prefix**: prefix for a per-deploy filesystem when `filesystem_id` is not set.
+   - **filesystem_size_gb**: size in GB for a per-deploy filesystem (default: 2).
 
 4. **After the run**: The job summary shows the **instance ID** and **public IP**. SSH into
    the instance and run your stack (e.g. pull images from GHCR and run docker compose with
    `HUGGINGFACE_HUB_TOKEN`). The gRPC inference endpoint is **`<instance-ip>:50051`** once
-   the stack is running.
+   the stack is running. The summary also shows the **filesystem ID** used for the deploy.
+
+5. **Teardown**: When you’re done, run **Actions → Teardown Lambda Cloud Resources** and
+   provide the **instance ID** and **filesystem ID** to terminate the instance and delete
+   the filesystem. Note that deletion can fail until the instance is fully terminated
+   and the filesystem is detached; rerun teardown if needed.
 
 See [.github/workflows/deploy-lambda.yml](.github/workflows/deploy-lambda.yml) and
 [docs/deployments.md](docs/deployments.md) for details.
