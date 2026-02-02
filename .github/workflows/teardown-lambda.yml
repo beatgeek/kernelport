@@ -35,9 +35,8 @@ jobs:
         if: ${{ github.event.inputs.delete_filesystem == 'true' && github.event.inputs.filesystem_id != '' }}
         run: |
           fs_id="${{ github.event.inputs.filesystem_id }}"
-          echo "Note: filesystem deletion can fail until the instance is fully terminated and detached."
           curl -sSf -u "${{ secrets.LAMBDA_CLOUD_API_KEY }}:" \
-            -X DELETE "${{ env.LAMBDA_API_BASE }}/filesystems/$fs_id" | jq .
+            -X DELETE "${{ env.LAMBDA_API_BASE }}/filesystems/$fs_id" | jq . || echo "Note: filesystem deletion can fail until the instance is fully terminated and detached."
 
       - name: Summary
         run: |
