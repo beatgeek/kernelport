@@ -1,0 +1,50 @@
+# Teardown KernelPort (LuxTTS) on Lambda Cloud: terminate instance, delete filesystem.
+# Trigger: workflow_dispatch. Requires repository secret: LAMBDA_CLOUD_API_KEY.
+name: Teardown Lambda Cloud Resources
+
+on:
+  workflow_dispatch:
+    inputs:
+      instance_id:
+        description: "Lambda instance ID to terminate"
+        required: true
+      filesystem_id:
+        description: "Filesystem ID to delete (optional)"
+        required: false
+      delete_filesystem:
+        description: "Delete filesystem if filesystem_id provided"
+        required: true
+        default: "true"
+
+env:
+  LAMBDA_API_BASE: "https://cloud.lambdalabs.com/api/v1"
+
+jobs:
+  teardown:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Terminate instance
+        run: |
+          id="${{ github.event.inputs.instance_id }}"
+          curl -sSf -u "${{ secrets.LAMBDA_CLOUD_API_KEY }}:" \
+            -X POST "${{ env.LAMBDA_API_BASE }}/instance-operations/terminate" \
+            -H "Content-Type: application/json" \
+            -d "{\"instance_ids\":[\"$id\"]}" | jq .
+
+      - name: Delete filesystem
+        if: ${{ github.event.inputs.delete_filesystem == 'true' && github.event.inputs.filesystem_id != '' }}
+        run: |
+          fs_id="${{ github.event.inputs.filesystem_id }}"
+          echo "Note: filesystem deletion can fail until the instance is fully terminated and detached."
+          curl -sSf -u "${{ secrets.LAMBDA_CLOUD_API_KEY }}:" \
+            -X DELETE "${{ env.LAMBDA_API_BASE }}/filesystems/$fs_id" | jq .
+
+      - name: Summary
+        run: |
+          echo "## Lambda Cloud teardown" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Instance ID**: ${{ github.event.inputs.instance_id }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event.inputs.filesystem_id }}" != "" ]; then
+            echo "- **Filesystem ID**: ${{ github.event.inputs.filesystem_id }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Filesystem deleted**: ${{ github.event.inputs.delete_filesystem }}" >> $GITHUB_STEP_SUMMARY
+          fi

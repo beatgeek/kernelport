@@ -32,6 +32,15 @@ Required repository secrets:
 
 Trigger: `workflow_dispatch` (manual) or push to a branch you configure. See the workflow file for inputs (e.g. instance type).
 
+Filesystem support:
+- By default, the deploy workflow creates a per-deploy filesystem in the same region you select for the instance.
+- Inputs let you override this by supplying an existing **filesystem_id**.
+- The job summary shows the filesystem ID used.
+
+Teardown:
+- Use [.github/workflows/teardown-lambda.yml](../.github/workflows/teardown-lambda.yml) to terminate the instance and delete the filesystem.
+- Deletion can fail until the instance is fully terminated and the filesystem is detached; rerun teardown if needed.
+
 ## LuxTTS tensor contract
 
 Inputs (all optional except `text` and `prompt_audio`; omitted use LuxTTS defaults):

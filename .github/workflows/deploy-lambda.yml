@@ -17,6 +17,17 @@ on:
       ssh_key_name:
         description: "Name of SSH key already added in Lambda Cloud"
         required: true
+      filesystem_id:
+        description: "Optional existing filesystem ID to attach"
+        required: false
+      filesystem_name_prefix:
+        description: "Prefix for new filesystem name (if filesystem_id not provided)"
+        required: false
+        default: "kernelport"
+      filesystem_size_gb:
+        description: "Filesystem size in GB (if filesystem_id not provided)"
+        required: false
+        default: "2"
 
 env:
   LAMBDA_API_BASE: "https://cloud.lambdalabs.com/api/v1"
@@ -72,11 +83,36 @@ jobs:
       - name: Launch instance
         id: launch
         run: |
+          fs_id="${{ github.event.inputs.filesystem_id }}"
+          if [ -z "$fs_id" ]; then
+            fs_name="${{ github.event.inputs.filesystem_name_prefix }}-${{ github.run_id }}"
+            fs_body=$(jq -n \
+              --arg name "$fs_name" \
+              --arg region "${{ github.event.inputs.region_name }}" \
+              --arg size "${{ github.event.inputs.filesystem_size_gb }}" \
+              '{name: $name, region_name: $region, size_gb: ($size|tonumber)}')
+            fs_resp=$(curl -sSf -u "${{ secrets.LAMBDA_CLOUD_API_KEY }}:" \
+              -X POST "${{ env.LAMBDA_API_BASE }}/filesystems" \
+              -H "Content-Type: application/json" \
+              -d "$fs_body")
+            fs_id=$(echo "$fs_resp" | jq -r '.data.id')
+            if [ -z "$fs_id" ] || [ "$fs_id" = "null" ]; then
+              echo "Filesystem creation failed"
+              echo "$fs_resp" | jq .
+              exit 1
+            fi
+            echo "Created filesystem $fs_id ($fs_name)"
+          else
+            echo "Using existing filesystem $fs_id"
+          fi
+          echo "filesystem_id=$fs_id" >> $GITHUB_OUTPUT
+
           body=$(jq -n \
             --arg region "${{ github.event.inputs.region_name }}" \
             --arg type "${{ github.event.inputs.instance_type_name }}" \
             --arg key "${{ github.event.inputs.ssh_key_name }}" \
-            '{region_name: $region, instance_type_name: $type, ssh_key_names: [$key]}')
+            --arg fs "$fs_id" \
+            '{region_name: $region, instance_type_name: $type, ssh_key_names: [$key], filesystem_ids: [$fs]}')
           resp=$(curl -sSf -u "${{ secrets.LAMBDA_CLOUD_API_KEY }}:" \
             -X POST "${{ env.LAMBDA_API_BASE }}/instance-operations/launch" \
             -H "Content-Type: application/json" \
@@ -121,6 +157,7 @@ jobs:
           echo "## Lambda Cloud instance" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Instance ID**: ${{ steps.launch.outputs.instance_ids }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Filesystem ID**: ${{ steps.launch.outputs.filesystem_id }}" >> $GITHUB_STEP_SUMMARY
           echo "- **IP**: ${{ steps.poll.outputs.instance_ip }}" >> $GITHUB_STEP_SUMMARY
           echo "- **gRPC endpoint**: ${{ steps.poll.outputs.instance_ip }}:50051 (after you deploy the stack on the instance)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
