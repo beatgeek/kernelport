@@ -176,10 +176,15 @@ jobs:
           echo "SSH into the instance and run your stack (e.g. docker compose). Set \`HUGGINGFACE_HUB_TOKEN\` when running the LuxTTS worker." >> $GITHUB_STEP_SUMMARY
 
       - name: Cleanup filesystem on failure
-        if: failure() && steps.filesystem.outputs.filesystem_created == 'true'
+        if: (failure() || cancelled()) && steps.filesystem.outputs.filesystem_created == 'true'
         run: |
           fs_id="${{ steps.filesystem.outputs.filesystem_id }}"
-          echo "Workflow failed and filesystem $fs_id was created in this run; attempting cleanup..."
-          del_resp=$(curl -sSf -u "${{ secrets.LAMBDA_CLOUD_API_KEY }}:" \
-            -X DELETE "${{ env.LAMBDA_API_BASE }}/filesystems/$fs_id" || true)
-          echo "Delete response: $del_resp"
+          echo "Workflow failed or was cancelled and filesystem $fs_id was created in this run; attempting cleanup..."
+          if del_resp=$(curl -sSf -u "${{ secrets.LAMBDA_CLOUD_API_KEY }}:" \
+            -X DELETE "${{ env.LAMBDA_API_BASE }}/filesystems/$fs_id" 2>&1); then
+            echo "Successfully deleted filesystem $fs_id"
+            echo "Delete response: $del_resp"
+          else
+            echo "::warning::Failed to delete filesystem $fs_id. Manual cleanup may be required."
+            echo "Error: $del_resp"
+          fi
