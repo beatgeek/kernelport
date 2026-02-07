@@ -185,6 +185,5 @@ jobs:
             echo "Successfully deleted filesystem $fs_id"
             echo "Delete response: $del_resp"
           else
-            echo "::warning::Failed to delete filesystem $fs_id. Manual cleanup may be required."
-            echo "Error: $del_resp"
+            echo "::warning::Failed to delete filesystem $fs_id. Manual cleanup may be required. Error: $del_resp"
           fi
