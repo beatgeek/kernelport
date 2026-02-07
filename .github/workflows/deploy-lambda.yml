@@ -175,7 +175,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "SSH into the instance and run your stack (e.g. docker compose). Set \`HUGGINGFACE_HUB_TOKEN\` when running the LuxTTS worker." >> $GITHUB_STEP_SUMMARY
 
-      - name: Cleanup filesystem on failure
+      - name: Cleanup filesystem on failure or cancellation
         if: (failure() || cancelled()) && steps.filesystem.outputs.filesystem_created == 'true'
         run: |
           fs_id="${{ steps.filesystem.outputs.filesystem_id }}"
