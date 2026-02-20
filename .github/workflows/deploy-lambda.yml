@@ -84,6 +84,7 @@ jobs:
         id: filesystem
         run: |
           fs_id="${{ github.event.inputs.filesystem_id }}"
+          fs_created="false"
           if [ -z "$fs_id" ]; then
             fs_name="${{ github.event.inputs.filesystem_name_prefix }}-${{ github.run_id }}"
             fs_body=$(jq -n \
@@ -107,10 +108,12 @@ jobs:
               exit 1
             fi
             echo "Created filesystem $fs_id ($fs_name)"
+            fs_created="true"
           else
             echo "Using existing filesystem $fs_id"
           fi
           echo "filesystem_id=$fs_id" >> $GITHUB_OUTPUT
+          echo "filesystem_created=$fs_created" >> $GITHUB_OUTPUT
 
       - name: Launch instance
         id: launch
@@ -171,3 +174,16 @@ jobs:
           echo "- **gRPC endpoint**: ${{ steps.poll.outputs.instance_ip }}:50051 (after you deploy the stack on the instance)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "SSH into the instance and run your stack (e.g. docker compose). Set \`HUGGINGFACE_HUB_TOKEN\` when running the LuxTTS worker." >> $GITHUB_STEP_SUMMARY
+
+      - name: Cleanup filesystem on failure or cancellation
+        if: (failure() || cancelled()) && steps.filesystem.outputs.filesystem_created == 'true'
+        run: |
+          fs_id="${{ steps.filesystem.outputs.filesystem_id }}"
+          echo "Workflow failed or was cancelled and filesystem $fs_id was created in this run; attempting cleanup..."
+          if del_resp=$(curl -sSf -u "${{ secrets.LAMBDA_CLOUD_API_KEY }}:" \
+            -X DELETE "${{ env.LAMBDA_API_BASE }}/filesystems/$fs_id" 2>&1); then
+            echo "Successfully deleted filesystem $fs_id"
+            echo "Delete response: $del_resp"
+          else
+            echo "::warning::Failed to delete filesystem $fs_id. Manual cleanup may be required. Error: $del_resp"
+          fi
