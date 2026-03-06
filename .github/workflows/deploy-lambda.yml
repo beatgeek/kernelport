@@ -76,6 +76,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: List instance types (optional)
+        continue-on-error: true
         run: |
           curl -sSf -u "${{ secrets.LAMBDA_CLOUD_API_KEY }}:" \
             "${{ env.LAMBDA_API_BASE }}/instance-types" | jq -r '.data | keys[]' | head -20
@@ -83,8 +84,15 @@ jobs:
       - name: Create or select filesystem
         id: filesystem
         run: |
-          fs_id="${{ github.event.inputs.filesystem_id }}"
+          fs_id_input="${{ github.event.inputs.filesystem_id }}"
+          # Trim leading/trailing whitespace from the filesystem_id input
+          fs_id=$(echo "$fs_id_input" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
           fs_created="false"
+          # If a filesystem_id was provided but does not match the expected pattern, fail fast
+          if [ -n "$fs_id" ] && ! printf '%s\n' "$fs_id" | grep -Eq '^fs_[[:alnum:]-]+$'; then
+            echo "Invalid filesystem_id '$fs_id'. Expected an ID like 'fs_...'."
+            exit 1
+          fi
           if [ -z "$fs_id" ]; then
             fs_name="${{ github.event.inputs.filesystem_name_prefix }}-${{ github.run_id }}"
             fs_body=$(jq -n \
@@ -92,7 +100,7 @@ jobs:
               --arg region "${{ github.event.inputs.region_name }}" \
               --arg size "${{ github.event.inputs.filesystem_size_gb }}" \
               '{name: $name, region_name: $region, size_gb: ($size|tonumber)}')
-            fs_resp=$(curl -sSf -u "${{ secrets.LAMBDA_CLOUD_API_KEY }}:" \
+            fs_resp=$(curl -sS -u "${{ secrets.LAMBDA_CLOUD_API_KEY }}:" \
               -X POST "${{ env.LAMBDA_API_BASE }}/filesystems" \
               -H "Content-Type: application/json" \
               -d "$fs_body")
@@ -175,11 +183,11 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "SSH into the instance and run your stack (e.g. docker compose). Set \`HUGGINGFACE_HUB_TOKEN\` when running the LuxTTS worker." >> $GITHUB_STEP_SUMMARY
 
-      - name: Cleanup filesystem on failure or cancellation
-        if: (failure() || cancelled()) && steps.filesystem.outputs.filesystem_created == 'true'
+      - name: Cleanup filesystem on failure
+        if: failure() && steps.filesystem.outputs.filesystem_created == 'true'
         run: |
           fs_id="${{ steps.filesystem.outputs.filesystem_id }}"
-          echo "Workflow failed or was cancelled and filesystem $fs_id was created in this run; attempting cleanup..."
+          echo "Workflow failed and filesystem $fs_id was created in this run; attempting cleanup..."
           if del_resp=$(curl -sSf -u "${{ secrets.LAMBDA_CLOUD_API_KEY }}:" \
             -X DELETE "${{ env.LAMBDA_API_BASE }}/filesystems/$fs_id" 2>&1); then
             echo "Successfully deleted filesystem $fs_id"
