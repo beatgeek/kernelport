@@ -118,3 +118,32 @@ jobs:
         run: |
           bash -n scripts/lambda/remote.sh scripts/lambda/run-stack.sh
           git diff --exit-code
+
+  gpu-image:
+    # Building a CUDA image needs no GPU: the CUDA libraries are just files in
+    # the base image, and a GPU is only required to execute kernels. This job
+    # therefore runs on a stock runner with no secrets and no cloud spend.
+    #
+    # What it proves: the image assembles, and the `kernelportd --help` step in
+    # Dockerfile.gpu executes the release binary against the runtime image's
+    # glibc on amd64. That is the check that catches a build/runtime base
+    # mismatch, which is otherwise only discovered by a manual Lambda deploy.
+    #
+    # What it does not prove: ONNX Runtime CUDA execution provider startup or
+    # any inference. Both need a real device; see the Lambda validation runbook.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build GPU image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.gpu
+          platforms: linux/amd64
+          push: false
+          # Shares the deploy workflow's cache scope, so a CI build warms the
+          # release build and vice versa.
+          cache-from: type=gha,scope=kernelport
+          cache-to: type=gha,scope=kernelport,mode=max
