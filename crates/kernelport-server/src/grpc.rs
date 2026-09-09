@@ -19,6 +19,12 @@ impl pb::inference_service_server::InferenceService for GrpcSvc {
     ) -> std::result::Result<Response<pb::InferResponse>, Status> {
         let req = req.into_inner();
 
+        if req.model != "demo" {
+            return Err(Status::not_found("unknown model"));
+        }
+        if req.inputs.is_empty() {
+            return Err(Status::invalid_argument("no inputs provided"));
+        }
         let mut inputs = Vec::with_capacity(req.inputs.len());
         for t in req.inputs {
             let dtype =
@@ -47,8 +53,10 @@ impl pb::inference_service_server::InferenceService for GrpcSvc {
             .await
             .map_err(|e| Status::unavailable(e.to_string()))?;
 
-        let InferenceResponse { outputs, timings } =
-            rx.await.map_err(|_| Status::internal("worker dropped"))?;
+        let InferenceResponse { outputs, timings } = rx
+            .await
+            .map_err(|_| Status::internal("worker dropped"))?
+            .map_err(Status::internal)?;
 
         let mut pb_outs = Vec::with_capacity(outputs.len());
         for (name, t) in outputs {

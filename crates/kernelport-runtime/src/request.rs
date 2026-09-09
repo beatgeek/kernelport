@@ -7,7 +7,7 @@ pub struct InferenceRequest {
     pub version: Option<String>,
     pub inputs: Vec<(IOName, Tensor)>,
     pub deadline: std::time::Instant,
-    pub resp_tx: oneshot::Sender<InferenceResponse>,
+    pub resp_tx: oneshot::Sender<Result<InferenceResponse, String>>,
 }
 
 #[derive(Debug)]

@@ -1,215 +1,160 @@
-# Deploy KernelPort (LuxTTS) to Lambda Cloud: build/push images to GHCR, launch GPU instance.
-# Trigger: workflow_dispatch. Requires repository secrets: LAMBDA_CLOUD_API_KEY, HUGGINGFACE_HUB_TOKEN.
-# You must add an SSH key in Lambda Cloud (https://cloud.lambda.ai/ssh-keys) and pass its name as input.
 name: Deploy to Lambda Cloud
-
 on:
   workflow_dispatch:
     inputs:
       instance_type_name:
-        description: "Lambda instance type (e.g. gpu_1x_a100)"
+        description: Lambda GPU type (x86_64 host with Docker and NVIDIA Container Toolkit)
         required: true
-        default: "gpu_1x_a100"
+        default: gpu_1x_a100
       region_name:
-        description: "Lambda region (e.g. us-tx-1)"
+        description: Lambda region
         required: true
-        default: "us-tx-1"
+        default: us-tx-1
       ssh_key_name:
-        description: "Name of SSH key already added in Lambda Cloud"
+        description: Lambda SSH key matching LAMBDA_SSH_PRIVATE_KEY
         required: true
       filesystem_id:
-        description: "Optional existing filesystem ID to attach"
+        description: Optional existing filesystem ID (always retained)
         required: false
-      filesystem_name_prefix:
-        description: "Prefix for new filesystem name (if filesystem_id not provided)"
-        required: false
-        default: "kernelport"
-      filesystem_size_gb:
-        description: "Filesystem size in GB (if filesystem_id not provided)"
-        required: false
-        default: "2"
-
-env:
-  LAMBDA_API_BASE: "https://cloud.lambdalabs.com/api/v1"
-
+      validation_mode:
+        description: Correctness test and benchmark workload
+        type: choice
+        options: [softmax, luxtts]
+        default: softmax
+      retain_instance:
+        description: Keep instance after successful validation (failures always clean up)
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: lambda-validation-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   build-push:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: write
+    outputs:
+      kernelport_digest: ${{ steps.kernelport.outputs.digest }}
+      worker_digest: ${{ steps.worker.outputs.digest }}
+      owner: ${{ steps.names.outputs.owner }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
+      - name: Validate required configuration before building or allocating
+        env:
+          LAMBDA_KEY: ${{ secrets.LAMBDA_CLOUD_API_KEY }}
+          SSH_KEY: ${{ secrets.LAMBDA_SSH_PRIVATE_KEY }}
+          HF_TOKEN: ${{ secrets.HUGGINGFACE_HUB_TOKEN }}
+          PROMPT: ${{ secrets.LUXTTS_PROMPT_WAV_BASE64 }}
+          MODE: ${{ inputs.validation_mode }}
+        run: |
+          test -n "$LAMBDA_KEY" && test -n "$SSH_KEY"
+          if [ "$MODE" = luxtts ]; then test -n "$HF_TOKEN" && test -n "$PROMPT"; fi
+      - id: names
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: echo "owner=${OWNER,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push kernelport (GPU)
+      - name: Build KernelPort
+        id: kernelport
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./Dockerfile.gpu
+          file: Dockerfile.gpu
+          platforms: linux/amd64
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/kernelport:gpu,ghcr.io/${{ github.repository_owner }}/kernelport:gpu-${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build and push kernelport-luxtts (GPU)
+          tags: ghcr.io/${{ steps.names.outputs.owner }}/kernelport:gpu-${{ github.sha }}
+          cache-from: type=gha,scope=kernelport
+          cache-to: type=gha,scope=kernelport,mode=max
+      - name: Build selected worker
+        id: worker
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./Dockerfile.luxtts
+          file: ${{ inputs.validation_mode == 'luxtts' && 'Dockerfile.luxtts' || 'Dockerfile.helion' }}
+          platforms: linux/amd64
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/kernelport-luxtts:gpu,ghcr.io/${{ github.repository_owner }}/kernelport-luxtts:gpu-${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  launch:
+          tags: ghcr.io/${{ steps.names.outputs.owner }}/kernelport-worker:${{ inputs.validation_mode }}-${{ github.sha }}
+          cache-from: type=gha,scope=worker-${{ inputs.validation_mode }}
+          cache-to: type=gha,scope=worker-${{ inputs.validation_mode }},mode=max
+  validate:
     needs: build-push
     runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: read
+    env:
+      LAMBDA_CLOUD_API_KEY: ${{ secrets.LAMBDA_CLOUD_API_KEY }}
     steps:
-      - name: List instance types (optional)
-        continue-on-error: true
+      - uses: actions/checkout@v4
+      - name: Provision instance and filesystem
+        id: provision
+        env:
+          REGION_NAME: ${{ inputs.region_name }}
+          INSTANCE_TYPE_NAME: ${{ inputs.instance_type_name }}
+          SSH_KEY_NAME: ${{ inputs.ssh_key_name }}
+          FILESYSTEM_ID: ${{ inputs.filesystem_id }}
+        run: python3 scripts/lambda/resources.py provision
+      - name: Save resource IDs immediately, including on provision failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-resource-ids-${{ github.run_id }}-${{ github.run_attempt }}
+          path: results/resources.json
+          if-no-files-found: warn
+      - name: Start stack, validate outputs, and benchmark
+        env:
+          LAMBDA_SSH_PRIVATE_KEY: ${{ secrets.LAMBDA_SSH_PRIVATE_KEY }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+          HUGGINGFACE_HUB_TOKEN: ${{ secrets.HUGGINGFACE_HUB_TOKEN }}
+          LUXTTS_PROMPT_WAV_BASE64: ${{ secrets.LUXTTS_PROMPT_WAV_BASE64 }}
+          VALIDATION_MODE: ${{ inputs.validation_mode }}
+          IMAGE_OWNER: ${{ needs.build-push.outputs.owner }}
+          SERVER_DIGEST: ${{ needs.build-push.outputs.kernelport_digest }}
+          WORKER_DIGEST: ${{ needs.build-push.outputs.worker_digest }}
         run: |
-          curl -sSf -u "${{ secrets.LAMBDA_CLOUD_API_KEY }}:" \
-            "${{ env.LAMBDA_API_BASE }}/instance-types" | jq -r '.data | keys[]' | head -20
-
-      - name: Create or select filesystem
-        id: filesystem
-        run: |
-          fs_id_input="${{ github.event.inputs.filesystem_id }}"
-          # Trim leading/trailing whitespace from the filesystem_id input
-          fs_id=$(echo "$fs_id_input" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-          fs_created="false"
-          # If a filesystem_id was provided but does not match the expected pattern, fail fast
-          if [ -n "$fs_id" ] && ! printf '%s\n' "$fs_id" | grep -Eq '^fs_[[:alnum:]-]+$'; then
-            echo "Invalid filesystem_id '$fs_id'. Expected an ID like 'fs_...'."
-            exit 1
-          fi
-          if [ -z "$fs_id" ]; then
-            fs_name="${{ github.event.inputs.filesystem_name_prefix }}-${{ github.run_id }}"
-            fs_body=$(jq -n \
-              --arg name "$fs_name" \
-              --arg region "${{ github.event.inputs.region_name }}" \
-              --arg size "${{ github.event.inputs.filesystem_size_gb }}" \
-              '{name: $name, region_name: $region, size_gb: ($size|tonumber)}')
-            fs_resp=$(curl -sS -u "${{ secrets.LAMBDA_CLOUD_API_KEY }}:" \
-              -X POST "${{ env.LAMBDA_API_BASE }}/filesystems" \
-              -H "Content-Type: application/json" \
-              -d "$fs_body")
-            fs_id=$(echo "$fs_resp" | jq -r '.data.id')
-            if [ -z "$fs_id" ] || [ "$fs_id" = "null" ]; then
-              err_msg=$(echo "$fs_resp" | jq -r '.error // .errors[0].message // .message // empty')
-              if [ -n "$err_msg" ] && [ "$err_msg" != "null" ]; then
-                echo "Filesystem creation failed: $err_msg"
-              else
-                echo "Filesystem creation failed; could not extract error message. Full response:"
-                echo "$fs_resp" | jq . || echo "$fs_resp"
-              fi
-              exit 1
-            fi
-            echo "Created filesystem $fs_id ($fs_name)"
-            fs_created="true"
-          else
-            echo "Using existing filesystem $fs_id"
-          fi
-          echo "filesystem_id=$fs_id" >> $GITHUB_OUTPUT
-          echo "filesystem_created=$fs_created" >> $GITHUB_OUTPUT
-
-      - name: Launch instance
-        id: launch
-        run: |
-          fs_id="${{ steps.filesystem.outputs.filesystem_id }}"
-          body=$(jq -n \
-            --arg region "${{ github.event.inputs.region_name }}" \
-            --arg type "${{ github.event.inputs.instance_type_name }}" \
-            --arg key "${{ github.event.inputs.ssh_key_name }}" \
-            --arg fs "$fs_id" \
-            '{region_name: $region, instance_type_name: $type, ssh_key_names: [$key], filesystem_ids: [$fs]}')
-          resp=$(curl -sSf -u "${{ secrets.LAMBDA_CLOUD_API_KEY }}:" \
-            -X POST "${{ env.LAMBDA_API_BASE }}/instance-operations/launch" \
-            -H "Content-Type: application/json" \
-            -d "$body")
-          echo "instance_ids=$(echo "$resp" | jq -r '.data.instance_ids[0]')" >> $GITHUB_OUTPUT
-          echo "$resp" | jq .
-
-      - name: Poll until instance is active
-        id: poll
-        run: |
-          id="${{ steps.launch.outputs.instance_ids }}"
-          for i in $(seq 1 30); do
-            resp=$(curl -sSf -u "${{ secrets.LAMBDA_CLOUD_API_KEY }}:" \
-              "${{ env.LAMBDA_API_BASE }}/instances/$id")
-            status=$(echo "$resp" | jq -r '.data.status')
-            ip=$(echo "$resp" | jq -r '.data.ip // empty')
-            echo "Attempt $i: status=$status ip=$ip"
-            if [ "$status" = "active" ] && [ -n "$ip" ]; then
-              echo "instance_ip=$ip" >> $GITHUB_OUTPUT
-              echo "Instance is up at $ip"
-              exit 0
-            fi
-            sleep 20
-          done
-          echo "Instance did not become active in time"
-          exit 1
-
-      - name: Smoke test (grpcurl)
-        continue-on-error: true
-        run: |
-          ip="${{ steps.poll.outputs.instance_ip }}"
-          if [ -z "$ip" ]; then exit 0; fi
-          # Instance may not have the stack running yet; user can SSH and run docker compose
-          if command -v grpcurl >/dev/null 2>&1; then
-            grpcurl -plaintext -connect-timeout 5 "$ip:50051" list || true
-          else
-            echo "grpcurl not installed; skip smoke test. Endpoint: $ip:50051"
-          fi
-
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          owner = os.environ['IMAGE_OWNER']
+          Path('images.json').write_text(json.dumps({
+            'kernelport': f"ghcr.io/{owner}/kernelport@{os.environ['SERVER_DIGEST']}",
+            'worker': f"ghcr.io/{owner}/kernelport-worker@{os.environ['WORKER_DIGEST']}",
+            'mode': os.environ['VALIDATION_MODE'], 'commit': os.environ['GITHUB_SHA'],
+          }))
+          PY
+          bash scripts/lambda/remote.sh
+      - name: Clean resources after failure or successful ephemeral run
+        if: ${{ !cancelled() && (failure() || !inputs.retain_instance) }}
+        run: python3 scripts/lambda/resources.py cleanup
+      - name: Save validation results and actual cleanup outcomes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: results/
+          if-no-files-found: error
       - name: Summary
+        if: always()
         run: |
-          echo "## Lambda Cloud instance" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Instance ID**: ${{ steps.launch.outputs.instance_ids }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Filesystem ID**: ${{ steps.filesystem.outputs.filesystem_id }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **IP**: ${{ steps.poll.outputs.instance_ip }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **gRPC endpoint**: ${{ steps.poll.outputs.instance_ip }}:50051 (after you deploy the stack on the instance)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "SSH into the instance and run your stack (e.g. docker compose). Set \`HUGGINGFACE_HUB_TOKEN\` when running the LuxTTS worker." >> $GITHUB_STEP_SUMMARY
-
-      - name: Cleanup resources on failure
-        if: failure() && steps.filesystem.outputs.filesystem_created == 'true'
-        run: |
-          fs_id="${{ steps.filesystem.outputs.filesystem_id }}"
-          instance_ids="${{ steps.launch.outputs.instance_ids }}"
-
-          echo "Workflow failed."
-          if [ -n "$instance_ids" ]; then
-            echo "Instance(s) $instance_ids were launched in this run; attempting to terminate..."
-            if term_resp=$(curl -sS -u "${{ secrets.LAMBDA_CLOUD_API_KEY }}:" \
-              -X POST "${{ env.LAMBDA_API_BASE }}/instance-operations/terminate" \
-              -H "Content-Type: application/json" \
-              -d "{\"instance_ids\":[\"$instance_ids\"]}" 2>&1); then
-              echo "Successfully requested termination for instance(s) $instance_ids"
-              echo "Terminate response: $term_resp"
-            else
-              echo "::warning::Failed to terminate instance(s) $instance_ids. Manual cleanup may be required. Error: $term_resp"
-            fi
-          else
-            echo "No instance_ids output available from launch step; skipping instance termination."
-          fi
-
-          echo "Filesystem $fs_id was created in this run; attempting cleanup..."
-          if del_resp=$(curl -sS -u "${{ secrets.LAMBDA_CLOUD_API_KEY }}:" \
-            -X DELETE "${{ env.LAMBDA_API_BASE }}/filesystems/$fs_id" 2>&1); then
-            echo "Successfully deleted filesystem $fs_id"
-            echo "Delete response: $del_resp"
-          else
-            echo "::warning::Failed to delete filesystem $fs_id. Manual cleanup may be required. Error: $del_resp"
-          fi
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          p = Path('results/resources.json')
+          state = json.loads(p.read_text()) if p.exists() else {}
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+            f.write('## Lambda validation\n\n')
+            for key in ('commit', 'instance_id', 'instance_ip', 'filesystem_id', 'filesystem_created', 'instance_terminated', 'filesystem_deleted', 'cleanup_errors'):
+              f.write(f'- **{key}**: {state.get(key, "not confirmed")}\n')
+            f.write('\nDownload the validation artifact for benchmark JSON, logs, and GPU samples. Cancelled runs require manual teardown using the resource-ID artifact or Lambda console.\n')
+          PY

@@ -19,6 +19,21 @@ jobs:
       - name: install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install ONNX Runtime
+        run: |
+          pip install onnxruntime==1.22.0
+          python - <<'PYTHON'
+          import onnxruntime, os
+          from pathlib import Path
+          capi = Path(onnxruntime.__file__).parent / 'capi'
+          with open(os.environ['GITHUB_ENV'], 'a') as f:
+              f.write(f"ORT_LIB_LOCATION={capi}\n")
+              f.write(f"ORT_DYLIB_PATH={next(capi.glob('libonnxruntime.so*'))}\n")
+          PYTHON
+
       - name: fmt
         run: cargo fmt --all -- --check
 
@@ -44,6 +59,21 @@ jobs:
       - name: install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install ONNX Runtime
+        run: |
+          pip install onnxruntime==1.22.0
+          python - <<'PYTHON'
+          import onnxruntime, os
+          from pathlib import Path
+          capi = Path(onnxruntime.__file__).parent / 'capi'
+          with open(os.environ['GITHUB_ENV'], 'a') as f:
+              f.write(f"ORT_LIB_LOCATION={capi}\n")
+              f.write(f"ORT_DYLIB_PATH={next(capi.glob('libonnxruntime.so*'))}\n")
+          PYTHON
+
       - name: ort identity (cpu)
         run: cargo test -p kernelport-backend-ort --test identity
 
@@ -57,3 +87,34 @@ jobs:
 
       - name: manifest_to_serve_args tests
         run: python tests/test_manifest_serve_args.py
+
+  inference-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y protobuf-compiler
+          pip install -r scripts/validation/requirements.txt onnxruntime==1.22.0 pyyaml
+          python - <<'PYTHON'
+          import onnxruntime, os
+          from pathlib import Path
+          capi = Path(onnxruntime.__file__).parent / 'capi'
+          with open(os.environ['GITHUB_ENV'], 'a') as f:
+              f.write(f"ORT_LIB_LOCATION={capi}\n")
+              f.write(f"ORT_DYLIB_PATH={next(capi.glob('libonnxruntime.so*'))}\n")
+          PYTHON
+      - name: Lifecycle and inference regressions
+        run: |
+          python tests/test_lambda_resources.py
+          cargo build --locked -p kernelport-server
+          python tests/test_inference_e2e.py
+      - name: Validate workflow scripts
+        run: |
+          bash -n scripts/lambda/remote.sh scripts/lambda/run-stack.sh
+          git diff --exit-code

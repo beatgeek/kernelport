@@ -1,2 +1,10 @@
 target
 .git
+
+.venv/
+.validation-venv/
+__pycache__/
+results/
+images.json
+worker.env
+prompt.wav

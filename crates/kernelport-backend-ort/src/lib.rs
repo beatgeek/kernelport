@@ -139,7 +139,8 @@ fn configure_cuda(builder: SessionBuilder, device_id: u32) -> Result<SessionBuil
         use ort::execution_providers::cuda::CUDAExecutionProvider;
         let ep = CUDAExecutionProvider::default()
             .with_device_id(device_id as i32)
-            .build();
+            .build()
+            .error_on_failure();
         builder
             .with_execution_providers([ep])
             .context("failed to enable ORT CUDA execution provider")
@@ -283,30 +284,42 @@ fn ort_value_to_tensor(value: &ort::value::ValueRef<'_>) -> Result<Tensor> {
     }
 }
 
-#[allow(clippy::manual_is_multiple_of)]
 fn bytes_to_f32(bytes: &Bytes) -> Result<Vec<f32>> {
-    ensure!(bytes.len() % 4 == 0, "f32 input has invalid byte length");
+    ensure!(
+        bytes.len().is_multiple_of(4),
+        "f32 input has invalid byte length"
+    );
     Ok(bytes
-        .chunks_exact(4)
-        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|b| f32::from_le_bytes(*b))
         .collect())
 }
 
-#[allow(clippy::manual_is_multiple_of)]
 fn bytes_to_i64(bytes: &Bytes) -> Result<Vec<i64>> {
-    ensure!(bytes.len() % 8 == 0, "i64 input has invalid byte length");
+    ensure!(
+        bytes.len().is_multiple_of(8),
+        "i64 input has invalid byte length"
+    );
     Ok(bytes
-        .chunks_exact(8)
-        .map(|b| i64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|b| i64::from_le_bytes(*b))
         .collect())
 }
 
-#[allow(clippy::manual_is_multiple_of)]
 fn bytes_to_i32(bytes: &Bytes) -> Result<Vec<i32>> {
-    ensure!(bytes.len() % 4 == 0, "i32 input has invalid byte length");
+    ensure!(
+        bytes.len().is_multiple_of(4),
+        "i32 input has invalid byte length"
+    );
     Ok(bytes
-        .chunks_exact(4)
-        .map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|b| i32::from_le_bytes(*b))
         .collect())
 }
 

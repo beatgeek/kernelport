@@ -88,10 +88,31 @@ impl BackendModel for HelionModel {
     }
 
     fn infer(&mut self, inputs: Vec<Tensor>) -> Result<Vec<Tensor>> {
-        let mut pb_inputs = Vec::with_capacity(inputs.len());
-        for (idx, input) in inputs.into_iter().enumerate() {
-            pb_inputs.push(tensor_to_pb(&format!("input{idx}"), input)?);
-        }
+        let named = inputs
+            .into_iter()
+            .enumerate()
+            .map(|(i, tensor)| {
+                let name = self
+                    .spec
+                    .inputs
+                    .get(i)
+                    .map(|s| s.name.clone())
+                    .unwrap_or_else(|| IOName(format!("input{i}")));
+                (name, tensor)
+            })
+            .collect();
+        Ok(self
+            .infer_named(named)?
+            .into_iter()
+            .map(|(_, tensor)| tensor)
+            .collect())
+    }
+
+    fn infer_named(&mut self, inputs: Vec<(IOName, Tensor)>) -> Result<Vec<(IOName, Tensor)>> {
+        let pb_inputs = inputs
+            .into_iter()
+            .map(|(name, tensor)| tensor_to_pb(&name.0, tensor))
+            .collect::<Result<Vec<_>>>()?;
 
         let mut request = tonic::Request::new(pb::InferRequest {
             model: self.model.clone(),
@@ -109,7 +130,7 @@ impl BackendModel for HelionModel {
 
         let mut outputs = Vec::with_capacity(response.outputs.len());
         for output in response.outputs {
-            outputs.push(pb_to_tensor(output)?);
+            outputs.push((IOName(output.name.clone()), pb_to_tensor(output)?));
         }
 
         Ok(outputs)
