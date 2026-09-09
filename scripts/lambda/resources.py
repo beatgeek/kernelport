@@ -15,10 +15,20 @@ import time
 from urllib import error, request
 
 
+# Transport failures carry no HTTP status; 0 stands in so they classify uniformly.
+TRANSPORT_ERROR = 0
+TRANSIENT_STATUSES = frozenset({TRANSPORT_ERROR, 429, 500, 502, 503, 504})
+
+
 class APIError(RuntimeError):
     def __init__(self, status, message):
         super().__init__(f"Lambda HTTP {status}: {message}")
         self.status = status
+
+    @property
+    def retryable(self):
+        """Transient server/transport faults; the request may be safely repeated."""
+        return self.status in TRANSIENT_STATUSES
 
 
 class API:
@@ -40,10 +50,34 @@ class API:
         except error.HTTPError as exc:
             # Do not echo request bodies or credentials in diagnostics.
             raise APIError(exc.code, f"{method} {path} failed") from exc
-        data = json.loads(raw) if raw else {}
+        except OSError as exc:
+            # URLError/TimeoutError/ConnectionError all subclass OSError. These
+            # carry no status, but are exactly the failures cleanup must survive.
+            raise APIError(TRANSPORT_ERROR, f"{method} {path} failed: transport error") from exc
+        try:
+            data = json.loads(raw) if raw else {}
+        except json.JSONDecodeError as exc:
+            # A truncated or non-JSON body (gateway error page) is transient.
+            raise APIError(TRANSPORT_ERROR, f"{method} {path} returned a malformed body") from exc
         if data.get("error") or data.get("errors"):
             raise APIError(200, f"{method} {path} returned an error envelope")
         return data.get("data")
+
+
+def get(api, path, attempts=5, delay=2):
+    """GET with retry on transient faults.
+
+    GETs are idempotent, so the module contract allows retrying them. Cleanup
+    depends on this: a single blip while listing resources must not abandon a
+    running instance or filesystem, which would bill until someone notices.
+    """
+    for attempt in range(attempts):
+        try:
+            return api.call("GET", path)
+        except APIError as exc:
+            if not exc.retryable or attempt == attempts - 1:
+                raise
+            time.sleep(delay)
 
 
 def identifier(value):
@@ -65,7 +99,7 @@ def save(path, state):
 def filesystem(api, state, state_path, region, existing, name):
     if existing.strip():
         fs_id = identifier(existing)
-        matches = [f for f in api.call("GET", "/filesystems") if f["id"] == fs_id]
+        matches = [f for f in get(api, "/filesystems") if f["id"] == fs_id]
         if len(matches) != 1:
             raise ValueError("filesystem ID not found in this account")
         fs = matches[0]
@@ -96,7 +130,7 @@ def launch(api, state, state_path, region, instance_type, ssh_key, name):
 
 def poll_active(api, state, state_path, attempts=60, delay=10):
     for _ in range(attempts):
-        info = api.call("GET", f"/instances/{identifier(state['instance_id'])}")
+        info = get(api, f"/instances/{identifier(state['instance_id'])}")
         if info["status"] == "active" and info.get("ip"):
             state.update(instance_ip=info["ip"], instance=info)
             save(state_path, state)
@@ -110,7 +144,7 @@ def poll_active(api, state, state_path, attempts=60, delay=10):
 def terminate(api, instance_id, attempts=60, delay=10):
     path = f"/instances/{identifier(instance_id)}"
     try:
-        info = api.call("GET", path)
+        info = get(api, path)
     except APIError as exc:
         if exc.status == 404:
             return
@@ -121,7 +155,7 @@ def terminate(api, instance_id, attempts=60, delay=10):
         api.call("POST", "/instance-operations/terminate", {"instance_ids": [instance_id]})
     for _ in range(attempts):
         try:
-            if api.call("GET", path)["status"] == "terminated":
+            if get(api, path)["status"] == "terminated":
                 return
         except APIError as exc:
             if exc.status == 404:
@@ -134,7 +168,7 @@ def terminate(api, instance_id, attempts=60, delay=10):
 def delete_filesystem(api, fs_id, attempts=30, delay=10):
     fs_id = identifier(fs_id)
     for _ in range(attempts):
-        filesystems = api.call("GET", "/filesystems")
+        filesystems = get(api, "/filesystems")
         fs = next((f for f in filesystems if f["id"] == fs_id), None)
         if fs is None:
             return
@@ -145,7 +179,8 @@ def delete_filesystem(api, fs_id, attempts=30, delay=10):
             except APIError as exc:
                 if exc.status == 404:
                     return
-                if exc.status not in (409, 429, 500, 502, 503, 504):
+                # 409 means still attached; the next poll re-checks.
+                if exc.status != 409 and not exc.retryable:
                     raise
             # Confirm absence on a subsequent list, even after a 2xx response.
         time.sleep(delay)

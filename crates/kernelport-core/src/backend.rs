@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::{Device, IOName, ModelArtifact, ModelSpec, Tensor};
+use crate::{Device, IOName, InvalidRequest, ModelArtifact, ModelSpec, Tensor};
 
 #[derive(Clone, Copy, Debug)]
 pub struct BackendCapabilities {
@@ -31,10 +31,17 @@ pub trait BackendModel: Send + 'static {
             let index = inputs
                 .iter()
                 .position(|(name, _)| name == &spec.name)
-                .ok_or_else(|| anyhow::anyhow!("missing input: {}", spec.name.0))?;
+                // Caller-caused: the request omitted an input the model declares.
+                .ok_or_else(|| InvalidRequest::err(format!("missing input: {}", spec.name.0)))?;
             ordered.push(inputs.remove(index).1);
         }
-        anyhow::ensure!(inputs.is_empty(), "unexpected or duplicate input names");
+        if !inputs.is_empty() {
+            let unexpected: Vec<&str> = inputs.iter().map(|(name, _)| name.0.as_str()).collect();
+            return Err(InvalidRequest::err(format!(
+                "unexpected or duplicate input names: {}",
+                unexpected.join(", ")
+            )));
+        }
         let names: Vec<_> = self.spec().outputs.iter().map(|s| s.name.clone()).collect();
         let outputs = self.infer(ordered)?;
         anyhow::ensure!(

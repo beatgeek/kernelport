@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
 spec = importlib.util.spec_from_file_location("resources", Path(__file__).resolve().parents[1] / "scripts/lambda/resources.py")
 r = importlib.util.module_from_spec(spec)
@@ -70,6 +70,32 @@ class ResourceTests(unittest.TestCase):
                 api.call("POST", "/instance-operations/launch", {})
             self.assertEqual(call.call_count, 1)
             self.assertNotIn("secret", str(caught.exception))
+
+    def test_transient_get_failure_during_cleanup_is_retried(self):
+        # A single blip listing filesystems must not abandon an owned filesystem,
+        # which would bill until someone notices it in the console.
+        api = FakeAPI([r.APIError(503, "unavailable"),
+                       [{"id": "fs_a", "is_in_use": False}], {}, []])
+        state = {"filesystem_id": "fs_a", "filesystem_created": True}
+        with patch.object(r.time, "sleep"):
+            r.cleanup(api, state, self.path, attempts=2, delay=0)
+        self.assertTrue(state["filesystem_deleted"])
+
+    def test_non_transient_get_failure_is_not_retried(self):
+        api = FakeAPI([r.APIError(403, "denied")])
+        with patch.object(r.time, "sleep"):
+            with self.assertRaises(r.APIError):
+                r.get(api, "/filesystems")
+        self.assertEqual(len(api.calls), 1)
+
+    def test_transport_failure_is_retryable_and_hides_detail(self):
+        with patch.dict(os.environ, {"LAMBDA_CLOUD_API_KEY": "test"}):
+            api = r.API()
+        with patch.object(r.request, "urlopen", side_effect=URLError("secret-host refused")):
+            with self.assertRaises(r.APIError) as caught:
+                api.call("GET", "/filesystems")
+        self.assertTrue(caught.exception.retryable)
+        self.assertNotIn("secret-host", str(caught.exception))
 
     def test_delete_error_does_not_claim_success(self):
         api = FakeAPI([[{"id": "fs_a", "is_in_use": False}], r.APIError(403, "denied")])

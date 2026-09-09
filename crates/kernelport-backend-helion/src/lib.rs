@@ -3,8 +3,8 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use bytes::Bytes;
 use kernelport_core::{
-    Backend, BackendCapabilities, BackendModel, DType, Device, IOName, ModelArtifact, ModelSpec,
-    Shape, Tensor, TensorSpec, TensorStorage,
+    Backend, BackendCapabilities, BackendModel, DType, Device, IOName, InvalidRequest,
+    ModelArtifact, ModelSpec, Shape, Tensor, TensorSpec, TensorStorage,
 };
 use kernelport_proto::kernelport::v1 as pb;
 use kernelport_proto::kernelport::v1::inference_service_client::InferenceServiceClient;
@@ -125,7 +125,7 @@ impl BackendModel for HelionModel {
             let handle = tokio::runtime::Handle::current();
             handle.block_on(async { client.infer(request).await })
         })
-        .context("helion inference request failed")?;
+        .map_err(classify_sidecar_status)?;
         let response = response.into_inner();
 
         let mut outputs = Vec::with_capacity(response.outputs.len());
@@ -134,6 +134,22 @@ impl BackendModel for HelionModel {
         }
 
         Ok(outputs)
+    }
+}
+
+/// Preserve the sidecar's own classification of a failure.
+///
+/// The sidecar rejects malformed requests with `INVALID_ARGUMENT` and reports
+/// its own faults with `INTERNAL`/`UNAVAILABLE`. Wrapping everything as a
+/// server fault would hide caller mistakes behind `INTERNAL` at our boundary.
+fn classify_sidecar_status(status: tonic::Status) -> anyhow::Error {
+    use tonic::Code;
+    let detail = format!("helion inference request failed: {status}");
+    match status.code() {
+        Code::InvalidArgument | Code::OutOfRange | Code::NotFound | Code::FailedPrecondition => {
+            InvalidRequest::err(detail)
+        }
+        _ => anyhow::anyhow!(detail),
     }
 }
 

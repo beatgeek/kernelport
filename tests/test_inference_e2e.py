@@ -48,23 +48,46 @@ class InferenceTests(unittest.TestCase):
         worker_port = cls.worker.add_insecure_port("127.0.0.1:0")
         cls.worker.start()
         cls.worker_endpoint = f"127.0.0.1:{worker_port}"
+        cls._start_server(worker_port)
+        cls.stub = pb_grpc.InferenceServiceStub(cls.channel)
+
+    @staticmethod
+    def _free_port():
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
-            port = sock.getsockname()[1]
-        cls.logs = tempfile.TemporaryFile()
-        cls.process = subprocess.Popen([cls.binary, "serve", "--backend", "helion",
-            "--helion-addr", f"http://127.0.0.1:{worker_port}",
-            "--grpc-addr", f"127.0.0.1:{port}"], stdout=cls.logs, stderr=cls.logs)
-        cls.endpoint = f"127.0.0.1:{port}"
-        cls.channel = grpc.insecure_channel(cls.endpoint)
-        try:
-            grpc.channel_ready_future(cls.channel).result(timeout=15)
-        except Exception:
-            cls.process.terminate()
-            cls.process.wait(timeout=10)
-            cls.logs.seek(0)
-            raise RuntimeError(cls.logs.read().decode())
-        cls.stub = pb_grpc.InferenceServiceStub(cls.channel)
+            return sock.getsockname()[1]
+
+    @classmethod
+    def _start_server(cls, worker_port, attempts=3):
+        """Start kernelportd on a free port, retrying only on a lost port race.
+
+        The probe socket must close before kernelportd can bind, so under CI
+        load another process can claim the port in between. Retry that case on
+        a fresh port; surface anything else immediately so real startup
+        failures are not hidden behind repeated attempts.
+        """
+        for attempt in range(attempts):
+            port = cls._free_port()
+            logs = tempfile.TemporaryFile()
+            process = subprocess.Popen([cls.binary, "serve", "--backend", "helion",
+                "--helion-addr", f"http://127.0.0.1:{worker_port}",
+                "--grpc-addr", f"127.0.0.1:{port}"], stdout=logs, stderr=logs)
+            channel = grpc.insecure_channel(f"127.0.0.1:{port}")
+            try:
+                grpc.channel_ready_future(channel).result(timeout=15)
+            except Exception:
+                channel.close()
+                process.terminate()
+                process.wait(timeout=10)
+                logs.seek(0)
+                output = logs.read().decode()
+                logs.close()
+                if "address in use" in output.lower() and attempt < attempts - 1:
+                    continue
+                raise RuntimeError(output)
+            cls.process, cls.channel, cls.logs = process, channel, logs
+            cls.endpoint = f"127.0.0.1:{port}"
+            return
 
     @classmethod
     def tearDownClass(cls):
@@ -87,6 +110,13 @@ class InferenceTests(unittest.TestCase):
         with self.assertRaises(grpc.RpcError) as caught:
             self.stub.Infer(pb.InferRequest(model="demo", inputs=[pb.Tensor(name="fail", dtype=pb.U8, shape=[1], data=b"x")]), timeout=10)
         self.assertEqual(caught.exception.code(), grpc.StatusCode.INTERNAL)
+
+    def test_client_caused_failures_are_not_reported_as_internal(self):
+        # The sidecar rejects this request with INVALID_ARGUMENT. The proxy must
+        # preserve that class so callers can tell a bad request from an outage.
+        with self.assertRaises(grpc.RpcError) as caught:
+            self.stub.Infer(pb.InferRequest(model="demo", inputs=[pb.Tensor(name="text", dtype=pb.U8, shape=[1], data=b"x")]), timeout=10)
+        self.assertEqual(caught.exception.code(), grpc.StatusCode.INVALID_ARGUMENT)
 
     def test_unknown_model_is_rejected(self):
         with self.assertRaises(grpc.RpcError) as caught:

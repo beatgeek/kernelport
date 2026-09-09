@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use bytes::Bytes;
 use kernelport_core::{DType, IOName, Shape, Tensor};
 use kernelport_proto::kernelport::v1 as pb;
-use kernelport_runtime::{InferenceRequest, InferenceResponse};
+use kernelport_runtime::{InferError, InferenceRequest, InferenceResponse};
 use tokio::sync::{mpsc, oneshot};
 use tonic::{Request, Response, Status};
 
@@ -56,7 +56,12 @@ impl pb::inference_service_server::InferenceService for GrpcSvc {
         let InferenceResponse { outputs, timings } = rx
             .await
             .map_err(|_| Status::internal("worker dropped"))?
-            .map_err(Status::internal)?;
+            .map_err(|err| match err {
+                // Caller-caused failures must stay distinguishable from server
+                // faults; clients and tests key retry behaviour off the code.
+                InferError::InvalidArgument(message) => Status::invalid_argument(message),
+                InferError::Internal(message) => Status::internal(message),
+            })?;
 
         let mut pb_outs = Vec::with_capacity(outputs.len());
         for (name, t) in outputs {

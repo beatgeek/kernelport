@@ -174,7 +174,7 @@ impl WorkerModel for DemoWorkerModel {
                         backend_us: t0.elapsed().as_micros() as u64,
                     },
                 })
-                .map_err(|err| format!("model inference failed: {err:#}"));
+                .map_err(|err| kernelport_runtime::InferError::from_backend(&err));
             let _ = req.resp_tx.send(result);
         }
         Ok(())
