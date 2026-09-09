@@ -179,7 +179,9 @@ KernelPort ships with separate Dockerfiles for CPU and GPU runtime environments:
 
 - `Dockerfile.cpu` builds a CPU-only image intended for local dev or CPU deployments.
 - `Dockerfile.gpu` builds a GPU-ready image that expects CUDA + TensorRT on the host.
-  - Base image: `debian:bookworm-slim` (matches the Rust build environment)
+  - Base image: `nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04` (ships the CUDA
+    runtime and cuDNN that the ONNX Runtime CUDA execution provider needs;
+    `--gpus` alone injects only the driver)
 
 The GPU image is designed for "bring your own kernel" by letting you mount a
 CUDA-enabled ONNX Runtime shared library at runtime:
@@ -189,10 +191,14 @@ CUDA-enabled ONNX Runtime shared library at runtime:
 
 ### Recommended NVIDIA stack
 
-- Driver: 535+ (or newer)
-- CUDA: 12.2
-- cuDNN: 8.9
-- TensorRT: 8.6
+- Driver: 535+ (or newer). CUDA minor version compatibility covers the 12.6
+  runtime in the image on any 12.x-capable driver.
+- CUDA: 12.6 (in the image)
+- cuDNN: 9 (in the image)
+- TensorRT: 8.6 (host-provided; not bundled)
+
+Mount a `libonnxruntime.so` built against CUDA 12.x so it resolves against the
+CUDA and cuDNN libraries already present in the image.
 
 ### Build
 

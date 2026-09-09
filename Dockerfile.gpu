@@ -8,7 +8,14 @@ RUN apt-get update \
 ENV ORT_LIB_LOCATION=/opt/ort
 RUN cargo build --locked -p kernelport-server --release --features ort-cuda
 
-FROM debian:bookworm-slim
+# The default CMD runs the ONNX backend on CUDA, so the runtime image must carry
+# the CUDA user-space libraries. `--gpus all` injects only the driver, not the
+# CUDA runtime or cuDNN, and the ORT CUDA execution provider needs both.
+#
+# Ubuntu 24.04 (glibc 2.39) rather than the CUDA 22.04 images (glibc 2.35): the
+# build stage links against bookworm's glibc 2.36, and glibc is only backward
+# compatible, so a 2.35 runtime cannot load this binary.
+FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
