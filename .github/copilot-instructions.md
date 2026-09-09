@@ -86,3 +86,7 @@ Docs and validated validation flow:
 ## Read This First (reduce exploration)
 - Assume `kernelportd` is the server binary.
 - Trust these instructions and only search if information here is missing or incorrect.
+
+## Review Focus
+- Prioritize Rust runtime paths and Helion sidecar integration (including Python worker and Dockerfiles).
+- Deprioritize YAML/docs unless they affect runtime behavior or deployment safety.
