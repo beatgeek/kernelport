@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::{Device, ModelArtifact, ModelSpec, Tensor};
+use crate::{Device, IOName, InvalidRequest, ModelArtifact, ModelSpec, Tensor};
 
 #[derive(Clone, Copy, Debug)]
 pub struct BackendCapabilities {
@@ -22,4 +22,32 @@ pub trait BackendModel: Send + 'static {
 
     /// Inputs are already batched and (eventually) on the right device.
     fn infer(&mut self, inputs: Vec<Tensor>) -> Result<Vec<Tensor>>;
+
+    /// Preserve the wire contract; positional backends use their declared IO order.
+    fn infer_named(&mut self, inputs: Vec<(IOName, Tensor)>) -> Result<Vec<(IOName, Tensor)>> {
+        let mut inputs = inputs;
+        let mut ordered = Vec::new();
+        for spec in &self.spec().inputs {
+            let index = inputs
+                .iter()
+                .position(|(name, _)| name == &spec.name)
+                // Caller-caused: the request omitted an input the model declares.
+                .ok_or_else(|| InvalidRequest::err(format!("missing input: {}", spec.name.0)))?;
+            ordered.push(inputs.remove(index).1);
+        }
+        if !inputs.is_empty() {
+            let unexpected: Vec<&str> = inputs.iter().map(|(name, _)| name.0.as_str()).collect();
+            return Err(InvalidRequest::err(format!(
+                "unexpected or duplicate input names: {}",
+                unexpected.join(", ")
+            )));
+        }
+        let names: Vec<_> = self.spec().outputs.iter().map(|s| s.name.clone()).collect();
+        let outputs = self.infer(ordered)?;
+        anyhow::ensure!(
+            names.len() == outputs.len(),
+            "output count does not match model spec"
+        );
+        Ok(names.into_iter().zip(outputs).collect())
+    }
 }

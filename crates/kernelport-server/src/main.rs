@@ -67,8 +67,8 @@ async fn serve(
     let scheduler_handle = Scheduler::handle(sched_tx);
 
     let batch_policy = BatchPolicy {
-        max_batch: 8,
-        max_delay: std::time::Duration::from_millis(5),
+        max_batch: 1,
+        max_delay: std::time::Duration::ZERO,
     };
     let batcher = Batcher::new(batch_policy, batcher_rx, scheduler_handle);
 
@@ -76,18 +76,17 @@ async fn serve(
     let mut reg = registry::ModelRegistry::new();
     match backend.as_str() {
         "onnx" => {
-            reg.load_onnx("demo", model_path, device).ok();
+            reg.load_onnx("demo", model_path, device)?;
         }
         "helion" => {
-            reg.load_helion("demo", helion_addr, helion_model, device)
-                .ok();
+            reg.load_helion("demo", helion_addr, helion_model, device)?;
         }
         other => {
             anyhow::bail!("unsupported backend: {other} (expected onnx or helion)");
         }
     }
 
-    let loaded = reg.get("demo");
+    let loaded = reg.get("demo").context("model not loaded")?;
     let worker_model = DemoWorkerModel { loaded };
 
     let worker = Worker {
@@ -148,73 +147,35 @@ fn parse_device(raw: &str) -> Result<kernelport_core::Device> {
 use kernelport_runtime::{BatchJob, WorkerModel};
 
 struct DemoWorkerModel {
-    loaded: Option<std::sync::Arc<registry::LoadedModel>>,
+    loaded: std::sync::Arc<registry::LoadedModel>,
 }
 
 impl WorkerModel for DemoWorkerModel {
     fn infer_batch(&mut self, job: BatchJob) -> anyhow::Result<()> {
-        let model = match self.loaded.as_ref() {
-            Some(model) => model,
-            None => {
-                tracing::error!("model not loaded (demo)");
-                for req in job.requests {
-                    let _ = req.resp_tx.send(kernelport_runtime::InferenceResponse {
-                        outputs: Vec::new(),
-                        timings: kernelport_runtime::Timings {
-                            queued_us: 0,
-                            batched_us: 0,
-                            backend_us: 0,
-                        },
-                    });
-                }
-                return Ok(());
-            }
-        };
-
-        // v0: no real batching; call model once and fan-out same output
-        let mut guard = model.model.lock().unwrap();
-
-        let t0 = std::time::Instant::now();
-        let outputs = match guard.infer(job.merged_inputs.into_iter().map(|(_, t)| t).collect()) {
-            Ok(outputs) => outputs,
-            Err(err) => {
-                tracing::error!(error = ?err, "model inference failed (demo)");
-                for req in job.requests {
-                    let _ = req.resp_tx.send(kernelport_runtime::InferenceResponse {
-                        outputs: Vec::new(),
-                        timings: kernelport_runtime::Timings {
-                            queued_us: 0,
-                            batched_us: 0,
-                            backend_us: 0,
-                        },
-                    });
-                }
-                return Ok(());
-            }
-        };
-        let backend_us = t0.elapsed().as_micros() as u64;
-
-        let output_names = model.output_names.clone();
+        // Until true stacking/splitting exists, execute each request independently.
+        // Never fan out one request's result to other callers.
+        let mut guard = self
+            .loaded
+            .model
+            .lock()
+            .map_err(|_| anyhow::anyhow!("model lock poisoned"))?;
         for req in job.requests {
-            let _ = req.resp_tx.send(kernelport_runtime::InferenceResponse {
-                outputs: outputs
-                    .iter()
-                    .cloned()
-                    .enumerate()
-                    .map(|(i, t)| {
-                        let name = output_names
-                            .get(i)
-                            .cloned()
-                            .unwrap_or_else(|| kernelport_core::IOName(format!("out{}", i)));
-                        (name, t)
-                    })
-                    .collect(),
-                timings: kernelport_runtime::Timings {
-                    queued_us: 0,
-                    batched_us: 0,
-                    backend_us,
-                },
-            });
+            if req.resp_tx.is_closed() {
+                continue;
+            }
+            let t0 = std::time::Instant::now();
+            let result = guard
+                .infer(req.inputs)
+                .map(|outputs| kernelport_runtime::InferenceResponse {
+                    outputs,
+                    timings: kernelport_runtime::Timings {
+                        queued_us: t0.duration_since(job.created_at).as_micros() as u64,
+                        batched_us: 0,
+                        backend_us: t0.elapsed().as_micros() as u64,
+                    },
+                })
+                .map_err(|err| kernelport_runtime::InferError::from_backend(&err));
+            let _ = req.resp_tx.send(result);
         }
         Ok(())
     }

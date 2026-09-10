@@ -3,8 +3,8 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use bytes::Bytes;
 use kernelport_core::{
-    Backend, BackendCapabilities, BackendModel, DType, Device, IOName, ModelArtifact, ModelSpec,
-    Shape, Tensor, TensorSpec, TensorStorage,
+    Backend, BackendCapabilities, BackendModel, DType, Device, IOName, InvalidRequest,
+    ModelArtifact, ModelSpec, Shape, Tensor, TensorSpec, TensorStorage,
 };
 use kernelport_proto::kernelport::v1 as pb;
 use kernelport_proto::kernelport::v1::inference_service_client::InferenceServiceClient;
@@ -88,10 +88,31 @@ impl BackendModel for HelionModel {
     }
 
     fn infer(&mut self, inputs: Vec<Tensor>) -> Result<Vec<Tensor>> {
-        let mut pb_inputs = Vec::with_capacity(inputs.len());
-        for (idx, input) in inputs.into_iter().enumerate() {
-            pb_inputs.push(tensor_to_pb(&format!("input{idx}"), input)?);
-        }
+        let named = inputs
+            .into_iter()
+            .enumerate()
+            .map(|(i, tensor)| {
+                let name = self
+                    .spec
+                    .inputs
+                    .get(i)
+                    .map(|s| s.name.clone())
+                    .unwrap_or_else(|| IOName(format!("input{i}")));
+                (name, tensor)
+            })
+            .collect();
+        Ok(self
+            .infer_named(named)?
+            .into_iter()
+            .map(|(_, tensor)| tensor)
+            .collect())
+    }
+
+    fn infer_named(&mut self, inputs: Vec<(IOName, Tensor)>) -> Result<Vec<(IOName, Tensor)>> {
+        let pb_inputs = inputs
+            .into_iter()
+            .map(|(name, tensor)| tensor_to_pb(&name.0, tensor))
+            .collect::<Result<Vec<_>>>()?;
 
         let mut request = tonic::Request::new(pb::InferRequest {
             model: self.model.clone(),
@@ -104,15 +125,31 @@ impl BackendModel for HelionModel {
             let handle = tokio::runtime::Handle::current();
             handle.block_on(async { client.infer(request).await })
         })
-        .context("helion inference request failed")?;
+        .map_err(classify_sidecar_status)?;
         let response = response.into_inner();
 
         let mut outputs = Vec::with_capacity(response.outputs.len());
         for output in response.outputs {
-            outputs.push(pb_to_tensor(output)?);
+            outputs.push((IOName(output.name.clone()), pb_to_tensor(output)?));
         }
 
         Ok(outputs)
+    }
+}
+
+/// Preserve the sidecar's own classification of a failure.
+///
+/// The sidecar rejects malformed requests with `INVALID_ARGUMENT` and reports
+/// its own faults with `INTERNAL`/`UNAVAILABLE`. Wrapping everything as a
+/// server fault would hide caller mistakes behind `INTERNAL` at our boundary.
+fn classify_sidecar_status(status: tonic::Status) -> anyhow::Error {
+    use tonic::Code;
+    let detail = format!("helion inference request failed: {status}");
+    match status.code() {
+        Code::InvalidArgument | Code::OutOfRange | Code::NotFound | Code::FailedPrecondition => {
+            InvalidRequest::err(detail)
+        }
+        _ => anyhow::anyhow!(detail),
     }
 }
 

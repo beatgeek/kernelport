@@ -124,7 +124,7 @@ class LuxTTSService:
 
         # LuxTTS returns tensor; ensure numpy float32 1D
         if hasattr(final_wav, "numpy"):
-            audio_np = final_wav.numpy().squeeze().astype(np.float32)
+            audio_np = final_wav.detach().cpu().numpy().squeeze().astype(np.float32)
         else:
             audio_np = np.asarray(final_wav, dtype=np.float32).squeeze()
         if audio_np.ndim != 1:

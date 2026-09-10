@@ -118,26 +118,13 @@ docker compose -f docker-compose.mock.yml up --build
 
 ---
 
-### Dynamic Batching
-Requests are dynamically batched per model and shape:
-- Configurable max batch size
-- Tight batching windows (ms-level)
-- Shape-aware grouping
+### Request execution and planned scheduling
 
-This improves GPU utilization without sacrificing latency SLAs.
-
----
-
-### GPU-Aware Scheduling
-KernelPort schedules work across:
-- GPUs (or MIG slices)
-- CUDA streams
-- Backend-specific execution contexts
-
-The scheduler can be tuned for:
-- Throughput
-- Latency
-- Fairness across models or tenants
+The current server executes requests independently through a single worker.
+Tensor stacking/splitting and GPU-aware scheduling are planned. Correctness
+under concurrent distinct inputs is covered by the inference regression suite;
+use the Lambda benchmark to establish a baseline before tuning batching,
+latency, throughput, or multi-GPU scheduling.
 
 ---
 
@@ -192,7 +179,9 @@ KernelPort ships with separate Dockerfiles for CPU and GPU runtime environments:
 
 - `Dockerfile.cpu` builds a CPU-only image intended for local dev or CPU deployments.
 - `Dockerfile.gpu` builds a GPU-ready image that expects CUDA + TensorRT on the host.
-  - Base image: `nvidia/cuda:12.2.0-runtime-ubuntu22.04`
+  - Base image: `nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04` (ships the CUDA
+    runtime and cuDNN that the ONNX Runtime CUDA execution provider needs;
+    `--gpus` alone injects only the driver)
 
 The GPU image is designed for "bring your own kernel" by letting you mount a
 CUDA-enabled ONNX Runtime shared library at runtime:
@@ -202,10 +191,14 @@ CUDA-enabled ONNX Runtime shared library at runtime:
 
 ### Recommended NVIDIA stack
 
-- Driver: 535+ (or newer)
-- CUDA: 12.2
-- cuDNN: 8.9
-- TensorRT: 8.6
+- Driver: 535+ (or newer). CUDA minor version compatibility covers the 12.6
+  runtime in the image on any 12.x-capable driver.
+- CUDA: 12.6 (in the image)
+- cuDNN: 9 (in the image)
+- TensorRT: 8.6 (host-provided; not bundled)
+
+Mount a `libonnxruntime.so` built against CUDA 12.x so it resolves against the
+CUDA and cuDNN libraries already present in the image.
 
 ### Build
 
@@ -267,41 +260,21 @@ For deployment options (LuxTTS, Lambda Cloud, GHCR) and required secrets, see
 
 - **LuxTTS**: Set `HUGGINGFACE_HUB_TOKEN` (or `HF_TOKEN`) when running the LuxTTS worker.
 - **Lambda Cloud deploy** (GitHub Actions): Add repository secrets
-  **LAMBDA_CLOUD_API_KEY** and **HUGGINGFACE_HUB_TOKEN** in
+  **LAMBDA_CLOUD_API_KEY** and **LAMBDA_SSH_PRIVATE_KEY** in
   Settings → Secrets and variables → Actions.
 
-### Deploy to Lambda Cloud
+### Deploy and validate on Lambda Cloud
 
-The GitHub Actions workflow **Deploy to Lambda Cloud** builds the kernelport and LuxTTS
-images, pushes them to GHCR, and launches a GPU instance on [Lambda Cloud](https://cloud.lambda.ai/).
+Run **Actions → Deploy to Lambda Cloud** with `validation_mode=softmax` for
+GPU correctness checks and a direct-worker versus KernelPort benchmark.
+The workflow starts the stack from immutable image digests, saves logs and
+results, and cleans up unless you choose to retain the instance.
 
-1. **Secrets** (one-time): In the repo go to **Settings → Secrets and variables → Actions**.
-   Add **LAMBDA_CLOUD_API_KEY** and **HUGGINGFACE_HUB_TOKEN**.
-
-2. **SSH key** (one-time): In [Lambda Cloud SSH keys](https://cloud.lambda.ai/ssh-keys), add
-   an SSH key and note its **name** (e.g. `macbook-pro`). The workflow needs this name.
-
-3. **Run the workflow**: Push your branch, then go to **Actions → Deploy to Lambda Cloud →
-   Run workflow**. Fill the inputs:
-   - **instance_type_name**: e.g. `gpu_1x_a100` (see [Lambda instance types](https://cloud.lambda.ai/instances)).
-   - **region_name**: e.g. `us-tx-1`.
-   - **ssh_key_name**: the exact name of your SSH key from step 2 (required).
-   - **filesystem_id** (optional): attach an existing filesystem ID instead of creating a new one.
-   - **filesystem_name_prefix**: prefix for a per-deploy filesystem when `filesystem_id` is not set.
-   - **filesystem_size_gb**: size in GB for a per-deploy filesystem (default: 2).
-
-4. **After the run**: The job summary shows the **instance ID** and **public IP**. SSH into
-   the instance and run your stack (e.g. pull images from GHCR and run docker compose with
-   `HUGGINGFACE_HUB_TOKEN`). The gRPC inference endpoint is **`<instance-ip>:50051`** once
-   the stack is running. The summary also shows the **filesystem ID** used for the deploy.
-
-5. **Teardown**: When you’re done, run **Actions → Teardown Lambda Cloud Resources** and
-   provide the **instance ID** and **filesystem ID** to terminate the instance and delete
-   the filesystem. Note that deletion can fail until the instance is fully terminated
-   and the filesystem is detached; rerun teardown if needed.
-
-See [.github/workflows/deploy-lambda.yml](.github/workflows/deploy-lambda.yml) and
-[docs/deployments.md](docs/deployments.md) for details.
+Set `LAMBDA_CLOUD_API_KEY` and `LAMBDA_SSH_PRIVATE_KEY`; the latter must match
+an SSH key registered in Lambda. LuxTTS additionally requires a Hugging Face
+token and a reference audio fixture. See the complete
+[Lambda validation runbook](docs/deploy/lambda-validation.md) for prerequisites,
+inputs, results, and cancellation cleanup.
 
 ## Pre-commit (local)
 

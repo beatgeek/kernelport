@@ -23,23 +23,10 @@ The authoritative mapping is in [deployments/deployments.yaml](../deployments/de
 
 ## Lambda Cloud deploy
 
-The GitHub Actions workflow [.github/workflows/deploy-lambda.yml](../.github/workflows/deploy-lambda.yml) can create a Lambda Cloud GPU instance, build and push images to GHCR, and run the LuxTTS stack (or another deployment) via cloud-init.
-
-Required repository secrets:
-
-- **LAMBDA_CLOUD_API_KEY** — Lambda Cloud API key for launching instances.
-- **HUGGINGFACE_HUB_TOKEN** — Hugging Face token for pulling models (e.g. LuxTTS); passed to the LuxTTS worker at runtime.
-
-Trigger: `workflow_dispatch` (manual) or push to a branch you configure. See the workflow file for inputs (e.g. instance type).
-
-Filesystem support:
-- By default, the deploy workflow creates a per-deploy filesystem in the same region you select for the instance.
-- Inputs let you override this by supplying an existing **filesystem_id**.
-- The job summary shows the filesystem ID used.
-
-Teardown:
-- Use [.github/workflows/teardown-lambda.yml](../.github/workflows/teardown-lambda.yml) to terminate the instance and delete the filesystem.
-- Deletion can fail until the instance is fully terminated and the filesystem is detached; rerun teardown if needed.
+See [Lambda validation](deploy/lambda-validation.md) for the automated
+provision → inference validation → benchmark → cleanup workflow, required
+secrets, artifacts, and manual teardown instructions. The default workload is
+Helion softmax; LuxTTS is a separate selectable contract test.
 
 ## LuxTTS tensor contract
 

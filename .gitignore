@@ -29,3 +29,11 @@ target
 
 # Snyk Security Extension - AI Rules (auto-generated)
 .cursor/rules/snyk_rules.mdc
+
+.venv/
+.validation-venv/
+__pycache__/
+results/
+images.json
+worker.env
+prompt.wav

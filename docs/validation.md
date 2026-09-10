@@ -125,3 +125,10 @@ grpcurl -plaintext -d '{
   ]
 }' localhost:50051 kernelport.v1.InferenceService/Infer
 ```
+
+## Automated Lambda validation
+
+See [the Lambda validation runbook](deploy/lambda-validation.md) for digest-pinned
+deployment, asserted inference results, direct-worker comparisons, artifact
+collection, and verified cleanup. The workflow does not treat a skipped gRPC
+connectivity check as a passing smoke test.

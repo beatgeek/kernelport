@@ -1,13 +1,21 @@
-FROM rust:1.85-bookworm AS build
+FROM rust:1.88-bookworm AS build
 
 WORKDIR /app
 COPY . .
 RUN apt-get update \
     && apt-get install -y --no-install-recommends protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
-RUN cargo build -p kernelport-server --release --features ort-cuda
+ENV ORT_LIB_LOCATION=/opt/ort
+RUN cargo build --locked -p kernelport-server --release --features ort-cuda
 
-FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
+# The default CMD runs the ONNX backend on CUDA, so the runtime image must carry
+# the CUDA user-space libraries. `--gpus all` injects only the driver, not the
+# CUDA runtime or cuDNN, and the ORT CUDA execution provider needs both.
+#
+# Ubuntu 24.04 (glibc 2.39) rather than the CUDA 22.04 images (glibc 2.35): the
+# build stage links against bookworm's glibc 2.36, and glibc is only backward
+# compatible, so a 2.35 runtime cannot load this binary.
+FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -17,7 +25,7 @@ RUN apt-get update \
         python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-RUN python3 -m pip install --no-cache-dir \
+RUN python3 -m pip install --no-cache-dir --break-system-packages \
         huggingface_hub==0.20.3 \
         pyyaml==6.0.1
 
@@ -25,7 +33,7 @@ WORKDIR /app
 COPY --from=build /app/target/release/kernelportd /app/kernelportd
 COPY scripts /app/scripts
 
-RUN chmod +x /app/scripts/entrypoint.sh
+RUN chmod +x /app/scripts/entrypoint.sh && /app/kernelportd --help
 
 ENTRYPOINT ["/app/scripts/entrypoint.sh"]
 CMD ["--device", "cuda:0"]

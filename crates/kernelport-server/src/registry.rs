@@ -8,16 +8,15 @@ use kernelport_core::{Backend, BackendModel, Device, IOName, ModelArtifact, Tens
 
 pub struct LoadedModel {
     pub model: Mutex<Box<dyn BackendModelAdapter>>,
-    pub output_names: Vec<IOName>,
 }
 
 pub trait BackendModelAdapter: Send {
-    fn infer(&mut self, inputs: Vec<Tensor>) -> Result<Vec<Tensor>>;
+    fn infer(&mut self, inputs: Vec<(IOName, Tensor)>) -> Result<Vec<(IOName, Tensor)>>;
 }
 
 impl<T: BackendModel> BackendModelAdapter for T {
-    fn infer(&mut self, inputs: Vec<Tensor>) -> Result<Vec<Tensor>> {
-        BackendModel::infer(self, inputs)
+    fn infer(&mut self, inputs: Vec<(IOName, Tensor)>) -> Result<Vec<(IOName, Tensor)>> {
+        BackendModel::infer_named(self, inputs)
     }
 }
 
@@ -43,15 +42,8 @@ impl ModelRegistry {
         let artifact = ModelArtifact::OnnxPath(path);
         let model = backend.load(&artifact, device)?;
 
-        let output_names = model
-            .spec()
-            .outputs
-            .iter()
-            .map(|spec| spec.name.clone())
-            .collect();
         let loaded = LoadedModel {
             model: Mutex::new(Box::new(model)),
-            output_names,
         };
 
         self.models.insert(name.to_string(), Arc::new(loaded));
@@ -69,15 +61,8 @@ impl ModelRegistry {
         let artifact = ModelArtifact::HelionGrpc { addr, model };
         let model = backend.load(&artifact, device)?;
 
-        let output_names = model
-            .spec()
-            .outputs
-            .iter()
-            .map(|spec| spec.name.clone())
-            .collect();
         let loaded = LoadedModel {
             model: Mutex::new(Box::new(model)),
-            output_names,
         };
 
         self.models.insert(name.to_string(), Arc::new(loaded));
